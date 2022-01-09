@@ -153,25 +153,24 @@
 
     <string name="project_manager_alpha_notice_title">Alpha notice</string>
     <string name="project_manager_alpha_notice">CodeAssist vẫn ở trong giai đoạn alpha,
-        bạn có thể gặp lỗi, bugs and incomplete features.\nYou
-        can report these issues at https://github.com/tyron12233/CodeAssist/issues</string>
+        bạn có thể thấy ứng dụng bị hỏng, gặp lỗi và một số tính năng chưa hoàn thành.\nBạn có thể báo cáo những vấn đề này tại https://github.com/tyron12233/CodeAssist/issues</string>
     <string name="project_manager_save_location_title">Select save location</string>
-    <string name="project_manager_permission_denied">Permission denied</string>
-    <string name="project_manager_button_request_again">Request again</string>
-    <string name="project_manager_button_continue">Continue</string>
-    <string name="project_manager_rationale_title">Storage permissions</string>
-    <string name="project_manager_button_allow">Allow</string>
-    <string name="project_manager_button_use_internal">Use internal storage</string>
+    <string name="project_manager_permission_denied">Quyền bị từ chối</string>
+    <string name="project_manager_button_request_again">Xin quyền lại</string>
+    <string name="project_manager_button_continue">Tiếp tục</string>
+    <string name="project_manager_rationale_title">Quyền truy cập bộ nhớ</string>
+    <string name="project_manager_button_allow">Cho phép</string>
+    <string name="project_manager_button_use_internal">Sử dụng bổ nhớ trong</string>
     <string name="project_manager_permission_rationale">The application needs storage permissions
         in order to save module files that will not be deleted when you uninstall the
         app. Alternatively you can choose to save module files into the app\'s internal storage.</string>
     <string name="project_manager_android11_notice">Projects will be saved to the app\'s internal storage directory.
         Backup your modules before uninstalling the app.</string>
-    <string name="project_manager_projects">Projects</string>
+    <string name="project_manager_projects">Các dự án</string>
     <string name="project_manager_empty">Projects are empty</string>`
-    <string name="project_manager_create_project">Create module</string>
+    <string name="project_manager_create_project">Tạo mô-đun</string>
     <string name="project_path_menu_title">Projects Path</string>
-    <string name="project_manager_null_projects">No Project Found</string>
+    <string name="project_manager_null_projects">Không có dự án nào</string>
     <string name="project_manager_suggestions">Suggestions:\n\n  - Create New Project\n  - Change Projects Path</string>
     
 
