@@ -9,7 +9,7 @@
     <item name="selectAll" formatted="true" type="string">Chọn tất cả</item>
     <item name="saveToProject" translatable="false" type="string">Dự án</item>
     <item name="cut" type="string" translatable="false">Cắt</item>
-    <item name="last" type="string">Cuối</item>
+    <item name="last" type="string">Đến cuối</item>
     <item name="next" type="string">Tiếp theo</item>
     <item name="replace" type="string">Thay thế</item>
     <item name="replaceAll" type="string">Thay thế tất cả</item>
@@ -147,13 +147,13 @@
     <string name="dialog_confirm_delete">Are you sure you want to delete %1$s?</string>
     <string name="dialog_delete">Delete</string>
     <string name="menu_preview_layout">Preview Layout</string>
-    <string name="action_menu_build_release">Build release APK</string>
-    <string name="action_menu_build_debug">Build debug APK</string>
-    <string name="action_menu_build_aab">Build AAB</string>
+    <string name="action_menu_build_release">Xây dựng APK phát hành</string>
+    <string name="action_menu_build_debug">Xây dựng APK gỡ lỗi</string>
+    <string name="action_menu_build_aab">Xây dựng AAB</string>
 
     <string name="project_manager_alpha_notice_title">Alpha notice</string>
-    <string name="project_manager_alpha_notice">CodeAssist is still in alpha,
-        you may encounter crashes, bugs and incomplete features.\nYou
+    <string name="project_manager_alpha_notice">CodeAssist vẫn ở trong giai đoạn alpha,
+        bạn có thể gặp lỗi, bugs and incomplete features.\nYou
         can report these issues at https://github.com/tyron12233/CodeAssist/issues</string>
     <string name="project_manager_save_location_title">Select save location</string>
     <string name="project_manager_permission_denied">Permission denied</string>
