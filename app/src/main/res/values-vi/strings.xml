@@ -176,13 +176,13 @@
 
     <!-- Compiler Service -->
     <string name="compilation_state_compiling">Compiling</string>
-    <string name="compilation_button_install">INSTALL</string>
+    <string name="compilation_button_install">CÀI ĐẶT</string>
     <string name="compilation_result_success">Compilation success</string>
     <string name="compilation_result_failed">Compilation failed</string>
 
     <!-- Library manager -->
-    <string name="library_manager_title">%1s Libraries</string>
-    <string name="group_id">Group Id</string>
+    <string name="library_manager_title">%1s thư viện</string>
+    <string name="group_id">ID nhóm</string>
     <string name="artifact_id">Artifact Id</string>
     <string name="version_name">Version Name</string>
     <string name="menu_display_dependencies">List dependencies</string>
