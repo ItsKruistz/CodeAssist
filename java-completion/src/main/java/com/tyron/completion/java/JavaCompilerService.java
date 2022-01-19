@@ -139,14 +139,19 @@ public class JavaCompilerService implements CompilerProvider {
      * @param sources Files to compile
      * @return CompileBatch for this compilation
      */
-    private CompileBatch compileBatch(Collection<? extends JavaFileObject> sources) {
-        if (needsCompile(sources)) {
-            loadCompile(sources);
-        } else {
-            Log.d("JavaCompilerService", "Using cached compile");
+    private CompilerContainer compileBatch(Collection<? extends JavaFileObject> sources) {
+        synchronized (mContainer) {
+            mContainer.initialize(() -> {
+                if (needsCompile(sources)) {
+                    loadCompile(sources);
+                } else {
+                    Log.d("JavaCompilerService", "Using cached compile");
+                }
+                CompileTask task = new CompileTask(cachedCompile);
+                mContainer.setCompileTask(task);
+            });
+            return mContainer;
         }
-        return cachedCompile;
-
     }
     
     public void clearDiagnostics() {
@@ -403,7 +408,7 @@ public class JavaCompilerService implements CompilerProvider {
      * @return a CompileTask for this compilation
      */
     @Override
-    public synchronized CompilerContainer compile(Path... files) {
+    public CompilerContainer compile(Path... files) {
         List<JavaFileObject> sources = new ArrayList<>();
         for (Path f : files) {
             sources.add(new SourceFileObject(f, mCurrentModule));
@@ -419,13 +424,8 @@ public class JavaCompilerService implements CompilerProvider {
      * @return a CompileTask for this compilation
      */
     @Override
-    public synchronized CompilerContainer compile(Collection<? extends JavaFileObject> sources) {
-        synchronized (mContainer) {
-            CompileBatch compile = compileBatch(sources);
-            CompileTask task = new CompileTask(compile);
-            mContainer.setCompileTask(task);
-            return mContainer;
-        }
+    public CompilerContainer compile(Collection<? extends JavaFileObject> sources) {
+        return compileBatch(sources);
     }
 
     public synchronized void close() {

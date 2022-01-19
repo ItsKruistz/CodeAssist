@@ -5,6 +5,7 @@ import androidx.annotation.Nullable;
 
 import com.google.common.base.Charsets;
 import com.google.common.base.Throwables;
+import com.tyron.builder.compiler.BuildType;
 import com.tyron.builder.compiler.incremental.resource.IncrementalAapt2Task;
 import com.tyron.builder.exception.CompilationFailedException;
 import com.tyron.builder.log.ILogger;
@@ -20,6 +21,8 @@ import com.tyron.completion.java.CompilerContainer;
 import com.tyron.completion.java.JavaCompilerProvider;
 import com.tyron.completion.java.JavaCompilerService;
 import com.tyron.completion.java.provider.CompletionEngine;
+import com.tyron.completion.xml.XmlIndexProvider;
+import com.tyron.completion.xml.XmlRepository;
 
 import org.apache.commons.io.FileUtils;
 
@@ -107,7 +110,8 @@ public class ProjectManager {
             mListener.onTaskStarted("Generating resource files.");
             IncrementalAapt2Task task = new IncrementalAapt2Task((AndroidModule) module, logger, false);
             try {
-                task.generateResourceClasses();
+                task.prepare(BuildType.DEBUG);
+                task.run();
             } catch (IOException | CompilationFailedException e) {
                 logger.warning("Unable to generate resource classes " + e.getMessage());
             }
@@ -119,18 +123,29 @@ public class ProjectManager {
                         .getIndex(JavaCompilerProvider.KEY);
                 JavaCompilerService service = provider.get(project, (JavaModule) module);
                 ((JavaModule) module).getJavaFiles().forEach((key, value) -> {
-                    //noinspection EmptyTryBlock
-                    try (CompilerContainer container = service.compile(value.toPath())) {
+                    CompilerContainer container = service.compile(value.toPath());
+                    container.run(__ -> {
 
-                    }
+                    });
                 });
-                mListener.onComplete(project, true, "Index successful");
             } catch (Throwable e) {
                 String message = "Failure indexing project.\n" +
                         Throwables.getStackTraceAsString(e);
                 mListener.onComplete(project, false, message);
             }
         }
+
+        if (module instanceof AndroidModule) {
+            mListener.onTaskStarted("Indexing XML files.");
+
+            XmlIndexProvider index = CompilerService.getInstance().getIndex(XmlIndexProvider.KEY);
+            index.clear();
+
+            XmlRepository xmlRepository = index.get(project, module);
+            xmlRepository.initialize((AndroidModule) module);
+        }
+
+        mListener.onComplete(project, true, "Index successful");
     }
 
     private void downloadLibraries(JavaModule project, TaskListener listener, ILogger logger) throws IOException {

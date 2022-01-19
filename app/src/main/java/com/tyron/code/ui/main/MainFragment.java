@@ -22,11 +22,15 @@ import androidx.lifecycle.ViewModelProvider;
 
 import com.google.android.material.progressindicator.LinearProgressIndicator;
 import com.google.android.material.transition.MaterialSharedAxis;
+import com.google.common.base.Strings;
 import com.google.gson.Gson;
 import com.tyron.builder.log.ILogger;
 import com.tyron.builder.model.DiagnosticWrapper;
 import com.tyron.builder.project.api.AndroidModule;
 import com.tyron.builder.project.api.Module;
+import com.tyron.code.ApplicationLoader;
+import com.tyron.code.ui.editor.api.FileEditor;
+import com.tyron.code.ui.editor.impl.FileEditorSavedState;
 import com.tyron.code.ui.library.LibraryManagerFragment;
 import com.tyron.code.ui.project.ProjectManager;
 import com.tyron.builder.compiler.BuildType;
@@ -46,6 +50,7 @@ import com.tyron.completion.java.provider.CompletionEngine;
 import org.openjdk.javax.tools.Diagnostic;
 
 import java.io.File;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -254,6 +259,8 @@ public class MainFragment extends Fragment implements ProjectManager.OnProjectOp
     @Override
     public void onPause() {
         super.onPause();
+
+        saveAll();
         mServiceConnection.setShouldShowNotification(true);
     }
 
@@ -279,7 +286,7 @@ public class MainFragment extends Fragment implements ProjectManager.OnProjectOp
      *
      * @param file file to open
      */
-    public void openFile(File file) {
+    public void openFile(FileEditor file) {
         mMainViewModel.openFile(file);
     }
 
@@ -318,10 +325,12 @@ public class MainFragment extends Fragment implements ProjectManager.OnProjectOp
             return;
         }
 
-        List<File> items = mMainViewModel.getFiles().getValue();
+        List<FileEditor> items = mMainViewModel.getFiles().getValue();
         if (items != null) {
             String itemString =
-                    new Gson().toJson(items.stream().map(File::getAbsolutePath).collect(Collectors.toList()));
+                    new Gson().toJson(items.stream()
+                            .map(FileEditorSavedState::new)
+                            .collect(Collectors.toList()));
             settings.edit().putString(ProjectSettings.SAVED_EDITOR_FILES, itemString).apply();
         }
     }

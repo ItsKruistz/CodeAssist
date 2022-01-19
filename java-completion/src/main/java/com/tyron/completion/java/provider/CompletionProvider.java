@@ -8,6 +8,7 @@ import com.github.javaparser.ast.NodeList;
 import com.github.javaparser.ast.body.MethodDeclaration;
 import com.github.javaparser.ast.body.Parameter;
 import com.github.javaparser.ast.type.ReferenceType;
+import com.github.javaparser.ast.type.Type;
 import com.tyron.builder.model.SourceFileObject;
 import com.tyron.common.util.StringSearch;
 import com.tyron.completion.java.CompileTask;
@@ -49,11 +50,11 @@ import org.openjdk.source.tree.SwitchTree;
 import org.openjdk.source.tree.Tree;
 import org.openjdk.source.util.TreePath;
 import org.openjdk.source.util.Trees;
-import org.openjdk.tools.javac.tree.JCTree;
 
 import java.io.File;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -87,7 +88,7 @@ public class CompletionProvider {
     private static final String[] METHOD_BODY_KEYWORDS = {"new", "assert", "try", "catch",
             "finally", "throw", "return", "break", "case", "continue", "default", "do", "while",
             "for", "switch", "if", "else", "instanceof", "final", "class", "void", "boolean",
-            "int", "long", "float", "double", "var"};
+            "int", "long", "float", "double"};
     //private final JavaParser parser;
     private final JavaCompilerService compiler;
 
@@ -132,27 +133,29 @@ public class CompletionProvider {
         boolean endsWithParen = endsWithParen(contents, (int) cursor);
 
         checkCanceled();
-        try (CompilerContainer container = compiler.compile(Collections.singletonList(source))) {
-            return container.get(task -> {
-                TreePath path = new FindCompletionsAt(task.task).scan(task.root(), cursor);
-                switch (path.getLeaf().getKind()) {
-                    case IDENTIFIER:
-                        return completeIdentifier(task, path, partial, endsWithParen);
-                    case MEMBER_SELECT:
-                        return completeMemberSelect(task, path, partial, endsWithParen);
-                    case MEMBER_REFERENCE:
-                        return completeMemberReference(task, path, partial);
-                    case CASE:
-                        return completeSwitchConstant(task, path, partial);
-                    case IMPORT:
-                        return completeImport(qualifiedPartialIdentifier(contents, (int) cursor));
-                    default:
-                        CompletionList list = new CompletionList();
-                        addKeywords(path, partial, list);
-                        return list;
-                }
-            });
-        }
+        CompilerContainer container = compiler.compile(Collections.singletonList(source));
+        return container.get(task -> {
+            TreePath path = new FindCompletionsAt(task.task).scan(task.root(), cursor);
+            switch (path.getLeaf().getKind()) {
+                case IDENTIFIER:
+                    return completeIdentifier(task, path, partial, endsWithParen);
+                case MEMBER_SELECT:
+                    return completeMemberSelect(task, path, partial, endsWithParen);
+                case MEMBER_REFERENCE:
+                    return completeMemberReference(task, path, partial);
+                case CASE:
+                    return completeSwitchConstant(task, path, partial);
+                case IMPORT:
+                    return completeImport(qualifiedPartialIdentifier(contents, (int) cursor));
+                case STRING_LITERAL:
+                    return new CompletionList();
+                default:
+                    CompletionList list = new CompletionList();
+                    addKeywords(path, partial, list);
+                    return list;
+            }
+        });
+
     }
 
     private void addTopLevelSnippets(ParseTask task, CompletionList list) {
@@ -242,20 +245,6 @@ public class CompletionProvider {
             path = path.getParentPath();
         }
         throw new RuntimeException("empty path");
-    }
-
-    private boolean isAnnotationTree(TreePath path) {
-        if (path == null) {
-            return false;
-        }
-
-        if (path.getLeaf() instanceof JCTree.JCIdent) {
-            if (path.getParentPath().getLeaf() instanceof JCTree.JCAnnotation) {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     private CompletionList completeIdentifier(CompileTask task, TreePath path,
@@ -350,8 +339,7 @@ public class CompletionProvider {
         HashMap<String, List<ExecutableElement>> methods = new HashMap<>();
         for (Element member : task.task.getElements().getAllMembers(typeElement)) {
             if (member.getKind() == ElementKind.CONSTRUCTOR) continue;
-            if (!StringSearch.matchesPartialName(member.getSimpleName(), partial) && !partial.endsWith("."))
-                continue;
+            if (FuzzySearch.partialRatio(String.valueOf(member.getSimpleName()), partial) < 70 && !partial.endsWith(".") && !partial.isEmpty()) continue;
             if (!trees.isAccessible(scope, member, type)) continue;
             if (isStatic != member.getModifiers().contains(Modifier.STATIC)) continue;
             if (member.getKind() == ElementKind.METHOD) {
@@ -398,16 +386,9 @@ public class CompletionProvider {
             if (label.contains("(")) {
                 label = label.substring(0, label.indexOf('('));
             }
-            return FuzzySearch.partialRatio(label, partial) > 90;
+            return FuzzySearch.partialRatio(label, partial) >= 70;
         };
 
-        if (path.getParentPath().getLeaf().getKind() == Tree.Kind.METHOD_INVOCATION) {
-            list.addAll(addLambda(task, path.getParentPath(), partial));
-        }
-
-        if (path.getParentPath().getLeaf().getKind() == Tree.Kind.NEW_CLASS) {
-            list.addAll(addAnonymous(task, path.getParentPath(), partial));
-        }
         for (Element element : ScopeHelper.scopeMembers(task, scope, filter)) {
             if (element.getKind() == ElementKind.METHOD) {
                 ExecutableElement executableElement = (ExecutableElement) element;
@@ -571,7 +552,7 @@ public class CompletionProvider {
             for (Element member : type.getEnclosedElements()) {
                 if (!member.getModifiers().contains(Modifier.STATIC)) continue;
                 if (!memberMatchesImport(id.getIdentifier(), member)) continue;
-                if (!StringSearch.matchesPartialName(member.getSimpleName(), partial)) continue;
+                if (FuzzySearch.partialRatio(String.valueOf(member.getSimpleName()), partial) < 70) continue;
                 if (member.getKind() == ElementKind.METHOD) {
                     methods.clear();
                     putMethod((ExecutableElement) member, methods);
@@ -699,7 +680,7 @@ public class CompletionProvider {
         TypeElement typeElement = (TypeElement) type.asElement();
         List<CompletionItem> list = new ArrayList<>();
         for (Element member : task.task.getElements().getAllMembers(typeElement)) {
-            if (!StringSearch.matchesPartialName(member.getSimpleName(), partial)) continue;
+            if (FuzzySearch.partialRatio(String.valueOf(member.getSimpleName()), partial) < 70) continue;
             if (member.getKind() != ElementKind.METHOD) continue;
             if (!trees.isAccessible(scope, member, type)) continue;
             if (!isStatic && member.getModifiers().contains(Modifier.STATIC)) continue;
@@ -889,7 +870,9 @@ public class CompletionProvider {
         item.label = getMethodLabel(methodDeclaration);
         item.commitText = methodDeclaration.getName() + ((methodRef || endsWithParen) ? "" :
                 "()");
-        item.detail = JavaParserUtil.prettyPrint(methodDeclaration.getType(), className -> false);
+        Type returnType = methodDeclaration.getType();
+        returnType = JavaParserUtil.getFirstType(returnType);
+        item.detail = JavaParserUtil.prettyPrint(returnType, className -> false);
         item.iconKind = DrawableKind.Method;
         item.cursorOffset = item.commitText.length();
         if (methodDeclaration.getParameters() != null && !methodDeclaration.getParameters().isEmpty()) {
@@ -990,7 +973,7 @@ public class CompletionProvider {
             case INTERFACE:
                 return DrawableKind.Interface;
             case FIELD:
-                return DrawableKind.Filed;
+                return DrawableKind.Field;
             default:
                 return DrawableKind.LocalVariable;
         }

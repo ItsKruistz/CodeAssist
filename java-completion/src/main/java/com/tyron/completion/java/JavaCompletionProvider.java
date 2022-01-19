@@ -7,7 +7,7 @@ import com.tyron.builder.project.api.JavaModule;
 import com.tyron.builder.project.api.Module;
 import com.tyron.completion.CompletionProvider;
 import com.tyron.completion.index.CompilerService;
-import com.tyron.completion.java.model.CachedCompletion;
+import com.tyron.completion.model.CachedCompletion;
 import com.tyron.completion.model.CompletionItem;
 import com.tyron.completion.model.CompletionList;
 import com.tyron.completion.progress.ProcessCanceledException;
@@ -28,8 +28,8 @@ public class JavaCompletionProvider extends CompletionProvider {
     }
 
     @Override
-    public String getFileExtension() {
-        return ".java";
+    public boolean accept(File file) {
+        return file.isFile() && file.getName().endsWith(".java");
     }
 
     @Override
@@ -53,7 +53,7 @@ public class JavaCompletionProvider extends CompletionProvider {
                             if (label.length() < partialIdentifier.length()) {
                                 return false;
                             }
-                            return FuzzySearch.partialRatio(label, partialIdentifier) > 90;
+                            return FuzzySearch.partialRatio(label, partialIdentifier) > 70;
                         }).collect(Collectors.toList());
                 CompletionList completionList = new CompletionList();
                 completionList.items = narrowedList;
@@ -86,6 +86,9 @@ public class JavaCompletionProvider extends CompletionProvider {
         } catch (Throwable e) {
             if (e instanceof ProcessCanceledException) {
                 throw e;
+            }
+            if (BuildConfig.DEBUG) {
+                Log.e("JavaCompletionProvider", "Unable to get completions", e);
             }
             compilerProvider.destroy();
         } finally {

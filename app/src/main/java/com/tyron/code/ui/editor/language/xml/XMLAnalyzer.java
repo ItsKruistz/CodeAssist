@@ -5,20 +5,20 @@ import android.os.Handler;
 import android.util.Log;
 
 import com.tyron.builder.compiler.BuildType;
-import com.tyron.builder.compiler.Task;
 import com.tyron.builder.compiler.incremental.resource.IncrementalAapt2Task;
 import com.tyron.builder.exception.CompilationFailedException;
 import com.tyron.builder.log.ILogger;
 import com.tyron.builder.project.Project;
 import com.tyron.builder.project.api.AndroidModule;
 import com.tyron.builder.project.api.Module;
+import com.tyron.code.BuildConfig;
 import com.tyron.code.ui.project.ProjectManager;
 import com.tyron.code.util.ProjectUtils;
 import com.tyron.completion.index.CompilerService;
-import com.tyron.completion.java.CompileTask;
 import com.tyron.completion.java.CompilerContainer;
 import com.tyron.completion.java.JavaCompilerProvider;
 import com.tyron.completion.java.JavaCompilerService;
+import com.tyron.completion.xml.lexer.XMLLexer;
 
 import org.antlr.v4.runtime.CharStreams;
 import org.antlr.v4.runtime.CodePointCharStream;
@@ -238,7 +238,9 @@ public class XMLAnalyzer implements CodeAnalyzer {
                             try {
                                 doGenerate(project, (AndroidModule) module, file, contents);
                             } catch (IOException | CompilationFailedException e) {
-                                Log.e("XMLAnalyzer", "Failed compiling", e);
+                                if (BuildConfig.DEBUG) {
+                                    Log.e("XMLAnalyzer", "Failed compiling", e);
+                                }
                             }
                         }
                     }
@@ -248,10 +250,14 @@ public class XMLAnalyzer implements CodeAnalyzer {
 
         private void doGenerate(Project project, AndroidModule module, File file,
                                 String contents) throws IOException, CompilationFailedException {
+            if (!file.canWrite() || !file.canRead()) {
+                return;
+            }
+
             FileUtils.writeStringToFile(file, contents, StandardCharsets.UTF_8);
             IncrementalAapt2Task task = new IncrementalAapt2Task(module, ILogger.EMPTY, false);
             task.prepare(BuildType.DEBUG);
-            task.generateResourceClasses();
+            task.run();
 
 
             // work around to refresh R.java file
@@ -260,9 +266,12 @@ public class XMLAnalyzer implements CodeAnalyzer {
                 JavaCompilerProvider provider =
                         CompilerService.getInstance().getIndex(JavaCompilerProvider.KEY);
                 JavaCompilerService service = provider.getCompiler(project, module);
-                //noinspection EmptyTryBlock
-                try (CompilerContainer container = service.compile(resourceClass.toPath())) {
 
+                if (service.isReady()) {
+                    CompilerContainer container = service.compile(resourceClass.toPath());
+                    container.run(__ -> {
+
+                    });
                 }
             }
         }

@@ -173,9 +173,7 @@ public class WizardFragment extends Fragment {
 
     private void onNavigateBack() {
         if (!mLast) {
-            getParentFragmentManager().beginTransaction()
-                    .remove(this)
-                    .commit();
+            getParentFragmentManager().popBackStack();
         } else {
             showTemplatesView();
             mLast = false;
@@ -484,10 +482,8 @@ public class WizardFragment extends Fragment {
 
                 if (mListener != null) {
                     requireActivity().runOnUiThread(() -> {
+                        getParentFragmentManager().popBackStack();
                         mListener.onProjectCreated(project);
-                        getParentFragmentManager().beginTransaction()
-                                .remove(WizardFragment.this)
-                                .commit();
                     });
                 }
             } catch (IOException e) {

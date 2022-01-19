@@ -5,11 +5,16 @@ import android.animation.AnimatorListenerAdapter;
 import android.animation.LayoutTransition;
 import android.app.Dialog;
 import android.content.ClipData;
+import android.content.Context;
+import android.graphics.Point;
 import android.os.Bundle;
 import android.util.Log;
+import android.view.Display;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.WindowManager;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
@@ -103,6 +108,10 @@ public class LayoutEditorFragment extends Fragment implements ProjectManager.OnP
             ProteusView.Manager manager = view.getViewManager();
             ProteusContext context = manager.getContext();
             Layout layout = manager.getLayout();
+            String tag = layout.type;
+            String parentTag = view.getAsView().getParent() instanceof ProteusView
+                    ? ((ProteusView) view.getAsView().getParent()).getViewManager().getLayout().type
+                    : "";
             ArrayList<Pair<String, String>> attributes = new ArrayList<>();
             for (Layout.Attribute attribute :
                     layout.getAttributes()) {
@@ -131,7 +140,7 @@ public class LayoutEditorFragment extends Fragment implements ProjectManager.OnP
                 availableAttributes.add(new Pair<>(key, ""));
             });
 
-            AttributeEditorDialogFragment.newInstance(availableAttributes, attributes)
+            AttributeEditorDialogFragment.newInstance(tag, parentTag, availableAttributes, attributes)
                     .show(getChildFragmentManager(), null);
 
             getChildFragmentManager().setFragmentResultListener(
@@ -317,10 +326,40 @@ public class LayoutEditorFragment extends Fragment implements ProjectManager.OnP
             mEditorRoot.addView(optionalView.get().getAsView());
             setDragListeners(mEditorRoot);
             setClickListeners(mEditorRoot);
+
+            requireActivity().runOnUiThread(() -> resizeLayoutEditor(mEditorRoot));
         } else {
             exit(getString(R.string.error), "Unable to inflate layout.");
         }
     }
+
+    private void resizeLayoutEditor(View root) {
+        final Point point = new Point();
+        ((WindowManager)requireActivity().getSystemService(Context.WINDOW_SERVICE))
+                .getDefaultDisplay().getRealSize(point);
+        final int screenWidth = point.x;
+        final int screenHeight = point.y;
+
+        final float xScale = (float) root.getWidth() / (float) screenWidth;
+        final float yScale = (float) root.getHeight() / (float) screenHeight;
+        final float minScale = Math.min(xScale, yScale);
+
+        // keep the original layout params
+        ViewGroup.LayoutParams layoutParams = root.getLayoutParams();
+        layoutParams.width = screenWidth;
+        layoutParams.height = screenHeight;
+
+        root.setScaleX(minScale);
+        root.setScaleY(minScale);
+
+        root.postDelayed(() -> {
+            final float xCorrection = (screenWidth - (screenWidth * minScale)) / 2;
+            root.setTranslationX(-xCorrection);
+            final float yCorrection = (screenHeight - (screenHeight * minScale)) / 2;
+            root.setTranslationY(-yCorrection);
+        }, 500);
+    }
+
 
     private void setDragListeners(ViewGroup viewGroup) {
         if (viewGroup instanceof ProteusView) {

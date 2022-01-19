@@ -6,29 +6,39 @@ import com.tyron.builder.compiler.manifest.xml.XmlFormatPreferences;
 import com.tyron.builder.compiler.manifest.xml.XmlFormatStyle;
 import com.tyron.builder.compiler.manifest.xml.XmlPrettyPrinter;
 import com.tyron.code.util.ProjectUtils;
+import com.tyron.completion.xml.XmlCharacter;
+import com.tyron.completion.xml.lexer.XMLLexer;
 
 import org.antlr.v4.runtime.CharStreams;
 import org.antlr.v4.runtime.Token;
 
 import java.io.File;
+import java.util.HashSet;
+import java.util.Set;
 
 import io.github.rosemoe.sora.interfaces.AutoCompleteProvider;
 import io.github.rosemoe.sora.interfaces.CodeAnalyzer;
 import io.github.rosemoe.sora.interfaces.EditorLanguage;
 import io.github.rosemoe.sora.interfaces.NewlineHandler;
 import io.github.rosemoe.sora.text.TextUtils;
+import io.github.rosemoe.sora.util.MyCharacter;
 import io.github.rosemoe.sora.widget.CodeEditor;
 import io.github.rosemoe.sora.widget.SymbolPairMatch;
 
 public class LanguageXML implements EditorLanguage {
 
 	private final CodeEditor mEditor;
+
 	public LanguageXML(CodeEditor codeEditor) {
 		mEditor = codeEditor;
 	}
+
 	@Override
 	public boolean isAutoCompleteChar(char ch) {
-		return ch != ' ';
+		return MyCharacter.isJavaIdentifierPart(ch)
+				|| ch == '<'
+				|| ch == ':'
+				|| ch == '.';
 	}
 
 	@Override
@@ -71,7 +81,7 @@ public class LanguageXML implements EditorLanguage {
 
 	@Override
 	public SymbolPairMatch getSymbolPairs() {
-		return null;
+		return new SymbolPairMatch.DefaultSymbolPairs();
 	}
 
 	@Override
@@ -92,6 +102,8 @@ public class LanguageXML implements EditorLanguage {
 			if (token.getType() == XMLLexer.OPEN) {
 				advance++;
 			} else if (token.getType() == XMLLexer.SLASH_CLOSE) {
+				advance--;
+			} else if (token.getType() == XMLLexer.CLOSE) {
 				advance--;
 			}
 		}

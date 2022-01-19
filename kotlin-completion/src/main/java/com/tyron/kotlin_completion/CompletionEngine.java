@@ -6,15 +6,15 @@ import android.util.Pair;
 import com.tyron.builder.model.DiagnosticWrapper;
 import com.tyron.builder.project.api.AndroidModule;
 import com.tyron.common.util.Debouncer;
-import com.tyron.completion.java.model.CachedCompletion;
+import com.tyron.completion.model.CachedCompletion;
 import com.tyron.completion.model.CompletionItem;
 import com.tyron.completion.model.CompletionList;
-import com.tyron.completion.model.DrawableKind;
 import com.tyron.completion.progress.ProgressManager;
 import com.tyron.kotlin_completion.completion.CompletionUtilsKt;
 import com.tyron.kotlin_completion.completion.Completions;
 import com.tyron.kotlin_completion.diagnostic.ConvertDiagnosticKt;
 import com.tyron.kotlin_completion.util.AsyncExecutor;
+import com.tyron.kotlin_completion.util.StringUtilsKt;
 
 import org.jetbrains.kotlin.diagnostics.Diagnostic;
 import org.jetbrains.kotlin.resolve.BindingContext;
@@ -22,13 +22,13 @@ import org.jetbrains.kotlin.resolve.diagnostics.Diagnostics;
 
 import java.io.File;
 import java.time.Duration;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.stream.Collectors;
 
 import kotlin.Unit;
 import kotlin.jvm.functions.Function0;
@@ -46,7 +46,7 @@ public class CompletionEngine {
     private final AsyncExecutor async = new AsyncExecutor();
     private CachedCompletion cachedCompletion;
 
-    private Debouncer debounceLint = new Debouncer(Duration.ofMillis(500));
+    private final Debouncer debounceLint = new Debouncer(Duration.ofMillis(500));
     private Set<File> lintTodo = new HashSet<>();
     private int lintCount = 0;
 
@@ -78,7 +78,7 @@ public class CompletionEngine {
         return sp;
     }
 
-    public Pair<CompiledFile, Integer> recover(File file, String contents, Recompile recompile, int offset) {
+    public synchronized Pair<CompiledFile, Integer> recover(File file, String contents, Recompile recompile, int offset) {
         boolean shouldRecompile = true;
         switch (recompile) {
             case NEVER:
@@ -124,21 +124,44 @@ public class CompletionEngine {
         if (isIndexing()) {
             return CompletableFuture.completedFuture(CompletionList.EMPTY);
         }
+
+        if (isIncrementalCompletion(cachedCompletion, file, prefix, line, column)) {
+            String partialIdentifier = partialIdentifier(prefix, prefix.length());
+            CompletionList cachedList = cachedCompletion.getCompletionList();
+            if (!cachedList.items.isEmpty()) {
+                List<CompletionItem> narrowedList =
+                        cachedList.items.stream().filter(item -> {
+                            String label = item.label;
+                            if (label.contains("(")) {
+                                label = label.substring(0, label.indexOf('('));
+                            }
+                            if (label.length() < partialIdentifier.length()) {
+                                return false;
+                            }
+                            return StringUtilsKt.containsCharactersInOrder(label, partialIdentifier, false);
+                        }).collect(Collectors.toList());
+                CompletionList completionList = new CompletionList();
+                completionList.items = narrowedList;
+                return CompletableFuture.completedFuture(completionList);
+            }
+        }
+
+        debounceLint.cancel();
+
         try {
             ProgressManager.getInstance().setCanceled(true);
             return async.compute(() -> {
                 ProgressManager.getInstance().setCanceled(false);
                 ProgressManager.getInstance().setRunning(true);
-                Instant now = Instant.now();
                 Pair<CompiledFile, Integer> recover = recover(file, contents, Recompile.NEVER, cursor);
-                Log.d("RECOVER", "Took " + Duration.between(now, Instant.now()).toMillis());
-                CompletionList list = CompletionUtilsKt.completions(recover.first, cursor, sp.getIndex(), partialIdentifier(contents, cursor));
-
-                ProgressManager.getInstance().setRunning(false);
-                return list;
+                String partialIdentifier = partialIdentifier(contents, cursor);
+                CompletionList completions = CompletionUtilsKt.completions(recover.first, cursor,
+                        sp.getIndex(), partialIdentifier);
+                cachedCompletion = new CachedCompletion(file, line, column, partialIdentifier, completions);
+                return completions;
             });
         } finally {
-
+            ProgressManager.getInstance().setRunning(false);
         }
     }
 
@@ -222,7 +245,8 @@ public class CompletionEngine {
     }
 
     public void doLint(File file, String contents, Function0<Boolean> cancelCallback, LintCallback callback) {
-        BindingContext context = recover(file, contents, Recompile.ALWAYS, 0).first.getCompile();
+        sp.put(file, contents, false);
+        BindingContext context = sp.compileFiles(Collections.singletonList(file));
         if (!cancelCallback.invoke()) {
             List<DiagnosticWrapper> diagnosticWrappers =
                     new ArrayList<>();

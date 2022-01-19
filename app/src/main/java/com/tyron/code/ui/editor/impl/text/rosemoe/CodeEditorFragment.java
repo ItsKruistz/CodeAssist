@@ -4,19 +4,24 @@ import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.os.Bundle;
 import android.util.Log;
+import android.view.Gravity;
 import android.view.LayoutInflater;
 import android.view.Menu;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.inputmethod.EditorInfo;
+import android.widget.PopupWindow;
+import android.widget.TextView;
 
 import androidx.annotation.NonNull;
+import androidx.appcompat.widget.TooltipCompat;
 import androidx.core.content.res.ResourcesCompat;
 import androidx.fragment.app.Fragment;
 import androidx.lifecycle.ViewModelProvider;
 import androidx.preference.PreferenceManager;
 
 import com.google.android.material.bottomsheet.BottomSheetBehavior;
+import com.google.android.material.tooltip.TooltipDrawable;
 import com.tyron.builder.log.LogViewModel;
 import com.tyron.code.BuildConfig;
 import com.tyron.code.ui.editor.Savable;
@@ -37,12 +42,16 @@ import com.tyron.code.ui.layoutEditor.LayoutEditorFragment;
 import com.tyron.code.ui.main.MainViewModel;
 import com.tyron.common.SharedPreferenceKeys;
 import com.tyron.completion.index.CompilerService;
+import com.tyron.completion.java.CompilerContainer;
 import com.tyron.completion.java.JavaCompilerProvider;
 import com.tyron.completion.java.JavaCompilerService;
 import com.tyron.completion.java.ParseTask;
 import com.tyron.completion.java.Parser;
+import com.tyron.completion.java.action.FindCurrentPath;
 import com.tyron.completion.java.action.api.JavaActionManager;
 import com.tyron.completion.java.action.api.EditorInterface;
+import com.tyron.completion.java.provider.FindHelper;
+import com.tyron.completion.java.rewrite.EditHelper;
 import com.tyron.completion.java.util.ActionUtil;
 import com.tyron.completion.model.TextEdit;
 import com.tyron.completion.java.provider.CompletionEngine;
@@ -50,12 +59,30 @@ import com.tyron.completion.java.rewrite.AddImport;
 import com.tyron.completion.model.CompletionItem;
 
 import org.apache.commons.io.FileUtils;
+import org.jetbrains.kotlin.com.intellij.openapi.vfs.VirtualFile;
+import org.jetbrains.kotlin.com.intellij.openapi.vfs.VirtualFileListener;
+import org.jetbrains.kotlin.com.intellij.openapi.vfs.VirtualFileManager;
+import org.jetbrains.kotlin.com.intellij.openapi.vfs.VirtualFileManagerListener;
+import org.jetbrains.kotlin.com.intellij.openapi.vfs.VirtualFilePropertyEvent;
+import org.jetbrains.kotlin.com.intellij.openapi.vfs.VirtualFileSystem;
+import org.jetbrains.kotlin.com.intellij.openapi.vfs.ex.VirtualFileManagerEx;
+import org.jetbrains.kotlin.com.intellij.openapi.vfs.impl.VirtualFileManagerImpl;
+import org.jetbrains.kotlin.com.intellij.openapi.vfs.local.CoreLocalFileSystem;
+import org.openjdk.javax.lang.model.element.Element;
+import org.openjdk.javax.lang.model.element.ExecutableElement;
+import org.openjdk.javax.lang.model.element.VariableElement;
+import org.openjdk.source.tree.MethodInvocationTree;
+import org.openjdk.source.util.TreePath;
+import org.openjdk.source.util.Trees;
 
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.stream.Collectors;
 
 import io.github.rosemoe.sora.interfaces.EditorEventListener;
 import io.github.rosemoe.sora.interfaces.EditorLanguage;
@@ -75,6 +102,8 @@ public class CodeEditorFragment extends Fragment implements Savable,
     private File mCurrentFile = new File("");
     private MainViewModel mMainViewModel;
     private SharedPreferences mPreferences;
+
+    private boolean mCanSave;
 
     public static CodeEditorFragment newInstance(File file) {
         CodeEditorFragment fragment = new CodeEditorFragment();
@@ -96,8 +125,10 @@ public class CodeEditorFragment extends Fragment implements Savable,
     public void onSaveInstanceState(@NonNull Bundle outState) {
         super.onSaveInstanceState(outState);
 
-        if (ProjectManager.getInstance().getCurrentProject() != null) {
-            ProjectManager.getInstance().getCurrentProject().getModule(mCurrentFile).getFileManager().setSnapshotContent(mCurrentFile, mEditor.getText().toString());
+        if (mCanSave) {
+            if (ProjectManager.getInstance().getCurrentProject() != null) {
+                ProjectManager.getInstance().getCurrentProject().getModule(mCurrentFile).getFileManager().setSnapshotContent(mCurrentFile, mEditor.getText().toString());
+            }
         }
     }
 
@@ -112,6 +143,20 @@ public class CodeEditorFragment extends Fragment implements Savable,
         if (BottomSheetBehavior.STATE_HIDDEN == mMainViewModel.getBottomSheetState().getValue()) {
             mMainViewModel.setBottomSheetState(BottomSheetBehavior.STATE_COLLAPSED);
         }
+
+        Project currentProject = ProjectManager.getInstance().getCurrentProject();
+        if (currentProject != null) {
+            Module module = currentProject.getModule(mCurrentFile);
+            Optional<CharSequence> fileContent =
+                    module.getFileManager().getFileContent(mCurrentFile);
+            if (fileContent.isPresent()) {
+                int line = mEditor.getCursor().getLeftLine();
+                int column = mEditor.getCursor().getLeftColumn();
+                mEditor.setText(fileContent.get());
+                mEditor.getCursor().set(line, column);
+                mEditor.notifyExternalCursorChange();
+            }
+        }
     }
 
 
@@ -123,10 +168,6 @@ public class CodeEditorFragment extends Fragment implements Savable,
     @Override
     public void onStart() {
         super.onStart();
-
-        if (!CompletionEngine.isIndexing()) {
-            mEditor.analyze();
-        }
     }
 
     @Override
@@ -198,13 +239,17 @@ public class CodeEditorFragment extends Fragment implements Savable,
             String text;
             try {
                 text = FileUtils.readFileToString(mCurrentFile, StandardCharsets.UTF_8);
+                mCanSave = true;
             } catch (IOException e) {
                 text = "File does not exist: " + e.getMessage();
+                mCanSave = false;
             }
             if (module != null) {
                 module.getFileManager().openFileForSnapshot(mCurrentFile, text);
             }
             mEditor.setText(text);
+        } else {
+            mCanSave = false;
         }
 
         mEditorEventListener = new CodeEditorEventListener(module, mCurrentFile);
@@ -215,8 +260,10 @@ public class CodeEditorFragment extends Fragment implements Savable,
                 window.setCancelShowUp(true);
 
                 int length = window.getLastPrefix().length();
-                if (window.getLastPrefix().contains(".")) {
-                    length -= window.getLastPrefix().lastIndexOf(".") + 1;
+                if (mLanguage instanceof JavaLanguage) {
+                    if (window.getLastPrefix().contains(".")) {
+                        length -= window.getLastPrefix().lastIndexOf(".") + 1;
+                    }
                 }
                 mEditor.getText().delete(cursor.getLeftLine(), cursor.getLeftColumn() - length,
                         cursor.getLeftLine(), cursor.getLeftColumn());
@@ -332,16 +379,26 @@ public class CodeEditorFragment extends Fragment implements Savable,
     public void onPause() {
         super.onPause();
 
-        mEditor.clearFocus();
         hideEditorWindows();
 
-        if (ProjectManager.getInstance().getCurrentProject() != null) {
-            ProjectManager.getInstance().getCurrentProject().getModule(mCurrentFile).getFileManager().setSnapshotContent(mCurrentFile, mEditor.getText().toString());
+        if (mCanSave) {
+            if (ProjectManager.getInstance().getCurrentProject() != null) {
+                ProjectManager.getInstance().getCurrentProject().getModule(mCurrentFile).getFileManager().setSnapshotContent(mCurrentFile, mEditor.getText().toString());
+            } else {
+                try {
+                    FileUtils.writeStringToFile(mCurrentFile, mEditor.getText().toString(), StandardCharsets.UTF_8);
+                } catch (IOException e) {
+                    // ignored
+                }
+            }
         }
     }
 
     @Override
     public void save() {
+        if (!mCanSave) {
+            return;
+        }
         if (mCurrentFile.exists()) {
             String oldContents = "";
             try {
@@ -414,6 +471,15 @@ public class CodeEditorFragment extends Fragment implements Savable,
 
     public void format() {
         if (mEditor != null) {
+            if (mEditor.getCursor().isSelected()) {
+                if (mLanguage instanceof JavaLanguage) {
+                    Cursor cursor = mEditor.getCursor();
+                    CharSequence format = mLanguage.format(mEditor.getText(), cursor.getLeft(),
+                            cursor.getRight());
+                    mEditor.setText(format);
+                    return;
+                }
+            }
             mEditor.formatCodeAsync();
         }
     }
