@@ -7,6 +7,7 @@ import android.content.IntentFilter;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
+import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -22,13 +23,16 @@ import androidx.lifecycle.ViewModelProvider;
 
 import com.google.android.material.progressindicator.LinearProgressIndicator;
 import com.google.android.material.transition.MaterialSharedAxis;
-import com.google.common.base.Strings;
 import com.google.gson.Gson;
+import com.tyron.actions.ActionManager;
+import com.tyron.actions.ActionPlaces;
+import com.tyron.actions.CommonDataKeys;
+import com.tyron.actions.DataContext;
+import com.tyron.actions.util.DataContextUtils;
 import com.tyron.builder.log.ILogger;
 import com.tyron.builder.model.DiagnosticWrapper;
 import com.tyron.builder.project.api.AndroidModule;
 import com.tyron.builder.project.api.Module;
-import com.tyron.code.ApplicationLoader;
 import com.tyron.code.ui.editor.api.FileEditor;
 import com.tyron.code.ui.editor.impl.FileEditorSavedState;
 import com.tyron.code.ui.library.LibraryManagerFragment;
@@ -47,15 +51,24 @@ import com.tyron.code.ui.file.FileViewModel;
 import com.tyron.code.ui.settings.SettingsActivity;
 import com.tyron.completion.java.provider.CompletionEngine;
 
+import org.jetbrains.kotlin.com.intellij.openapi.util.Key;
 import org.openjdk.javax.tools.Diagnostic;
 
 import java.io.File;
-import java.io.IOException;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 
 public class MainFragment extends Fragment implements ProjectManager.OnProjectOpenListener {
+
+    public static final String REFRESH_TOOLBAR_KEY = "refreshToolbar";
+
+    public static final Key<CompileCallback> COMPILE_CALLBACK_KEY = Key.create("compileCallback");
+    public static final Key<IndexCallback> INDEX_CALLBACK_KEY = Key.create("indexCallbackKey");
+    public static final Key<MainViewModel> MAIN_VIEW_MODEL_KEY = Key.create("mainViewModel");
+    public static final Key<FileEditor> FILE_EDITOR_KEY = Key.create("fileEditor");
 
     public static MainFragment newInstance(@NonNull String projectPath) {
         Bundle bundle = new Bundle();
@@ -92,6 +105,10 @@ public class MainFragment extends Fragment implements ProjectManager.OnProjectOp
     private CompilerServiceConnection mServiceConnection;
     private IndexServiceConnection mIndexServiceConnection;
 
+    private final CompileCallback mCompileCallback = this::compile;
+    private final IndexCallback mIndexCallback = this::openProject;
+
+
     public MainFragment() {
 
     }
@@ -127,7 +144,10 @@ public class MainFragment extends Fragment implements ProjectManager.OnProjectOp
 
         mToolbar = mRoot.findViewById(R.id.toolbar);
         mToolbar.setNavigationIcon(R.drawable.ic_baseline_menu_24);
-        mToolbar.inflateMenu(R.menu.code_editor_menu);
+
+        getChildFragmentManager().setFragmentResultListener(REFRESH_TOOLBAR_KEY, getViewLifecycleOwner(),
+                (key, __) -> refreshToolbar());
+        refreshToolbar();
 
         if (savedInstanceState != null) {
             restoreViewState(savedInstanceState);
@@ -167,46 +187,6 @@ public class MainFragment extends Fragment implements ProjectManager.OnProjectOp
         } else {
             mToolbar.setNavigationIcon(null);
         }
-
-        mToolbar.setOnMenuItemClickListener(item -> {
-            if (item.getItemId() == R.id.debug_refresh) {
-                saveAll();
-                if (!mServiceConnection.isCompiling()) {
-                    Project project = ProjectManager.getInstance().getCurrentProject();
-                    if (project != null) {
-                        openProject(project);
-                    }
-                }
-            } else if (item.getItemId() == R.id.action_build_debug) {
-                compile(BuildType.DEBUG);
-            } else if (item.getItemId() == R.id.action_build_release) {
-                compile(BuildType.RELEASE);
-            } else if (item.getItemId() == R.id.action_build_aab) {
-                compile(BuildType.AAB);
-            } else if (item.getItemId() == R.id.action_format) {
-                getChildFragmentManager().setFragmentResult(EditorContainerFragment.FORMAT_KEY,
-                        Bundle.EMPTY);
-            } else if (item.getItemId() == R.id.menu_settings) {
-                Intent intent = new Intent();
-                intent.setClass(requireActivity(), SettingsActivity.class);
-                startActivity(intent);
-                return true;
-            } else if (item.getItemId() == R.id.menu_preview_layout) {
-                getChildFragmentManager().setFragmentResult(EditorContainerFragment.PREVIEW_KEY,
-                        Bundle.EMPTY);
-            } else if (item.getItemId() == R.id.library_manager) {
-                FragmentManager fm = getParentFragmentManager();
-                if (fm.findFragmentByTag(LibraryManagerFragment.TAG) == null) {
-                    String path = mProject.getMainModule().getRootFile().getAbsolutePath();
-                    Fragment fragment = LibraryManagerFragment.newInstance(path);
-                    getParentFragmentManager().beginTransaction()
-                            .add(R.id.fragment_container, fragment, LibraryManagerFragment.TAG)
-                            .addToBackStack(LibraryManagerFragment.TAG).commit();
-                }
-            }
-
-            return false;
-        });
 
         File root;
         if (mProject != null) {
@@ -383,5 +363,27 @@ public class MainFragment extends Fragment implements ProjectManager.OnProjectOp
             requireActivity().registerReceiver(mLogReceiver,
                     new IntentFilter(((AndroidModule) module).getPackageName() + ".LOG"));
         }
+    }
+    private void injectData(DataContext context) {
+        context.putData(CommonDataKeys.PROJECT, ProjectManager.getInstance().getCurrentProject());
+        context.putData(CommonDataKeys.ACTIVITY, getActivity());
+        context.putData(MAIN_VIEW_MODEL_KEY, mMainViewModel);
+        context.putData(COMPILE_CALLBACK_KEY, mCompileCallback);
+        context.putData(INDEX_CALLBACK_KEY, mIndexCallback);
+        context.putData(FILE_EDITOR_KEY, mMainViewModel.getCurrentFileEditor());
+    }
+    public void refreshToolbar() {
+        mToolbar.getMenu().clear();
+
+        DataContext context = DataContextUtils.getDataContext(mToolbar);
+        injectData(context);
+
+        Instant now = Instant.now();
+        ActionManager.getInstance().fillMenu(context,
+                mToolbar.getMenu(),
+                ActionPlaces.MAIN_TOOLBAR,
+                false,
+                true);
+        Log.d("ActionManager", "fillMenu() took " + Duration.between(now, Instant.now()).toMillis());
     }
 }

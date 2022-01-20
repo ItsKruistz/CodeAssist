@@ -5,8 +5,21 @@ import android.os.Bundle;
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 
+import com.tyron.actions.ActionManager;
+import com.tyron.actions.AnAction;
+import com.tyron.actions.AnActionEvent;
+import com.tyron.code.ui.editor.action.CloseAllEditorAction;
+import com.tyron.code.ui.editor.action.CloseFileEditorAction;
+import com.tyron.code.ui.editor.action.CloseOtherEditorAction;
+import com.tyron.code.ui.editor.action.DiagnosticInfoAction;
+import com.tyron.code.ui.editor.action.PreviewLayoutAction;
+import com.tyron.code.ui.main.action.compile.CompileActionGroup;
+import com.tyron.code.ui.main.action.other.FormatAction;
+import com.tyron.code.ui.main.action.other.OpenSettingsAction;
+import com.tyron.code.ui.main.action.project.ProjectActionGroup;
 import com.tyron.code.ui.project.ProjectManagerFragment;
 import com.tyron.completion.index.CompilerService;
+import com.tyron.completion.java.CompletionModule;
 import com.tyron.completion.java.JavaCompilerProvider;
 import com.tyron.completion.java.JavaCompletionProvider;
 import com.tyron.completion.main.CompletionEngine;
@@ -31,6 +44,25 @@ public class MainActivity extends AppCompatActivity {
                 engine.registerCompletionProvider(new XmlCompletionProvider());
                 engine.registerCompletionProvider(new AndroidManifestCompletionProvider());
             }
+        });
+        startupManager.addStartupActivity(() -> {
+            ActionManager manager = ActionManager.getInstance();
+            // main toolbar actions
+            manager.registerAction(CompileActionGroup.ID, new CompileActionGroup());
+            manager.registerAction(ProjectActionGroup.ID, new ProjectActionGroup());
+            manager.registerAction(PreviewLayoutAction.ID, new PreviewLayoutAction());
+            manager.registerAction(OpenSettingsAction.ID, new OpenSettingsAction());
+            manager.registerAction(FormatAction.ID, new FormatAction());
+
+            // editor tab actions
+            manager.registerAction(CloseFileEditorAction.ID, new CloseFileEditorAction());
+            manager.registerAction(CloseOtherEditorAction.ID, new CloseOtherEditorAction());
+            manager.registerAction(CloseAllEditorAction.ID, new CloseAllEditorAction());
+
+            // editor actions
+            manager.registerAction(DiagnosticInfoAction.ID, new DiagnosticInfoAction());
+            // java actions
+            CompletionModule.registerActions(manager);
         });
         startupManager.startup();
 
