@@ -1,14 +1,11 @@
 package com.tyron.completion.java.rewrite;
 
-import android.util.Log;
-
 import com.github.javaparser.ast.body.MethodDeclaration;
 import com.google.common.base.Strings;
-import com.tyron.completion.java.CompileTask;
-import com.tyron.completion.java.CompilerContainer;
+import com.tyron.completion.java.compiler.CompilerContainer;
 import com.tyron.completion.java.CompilerProvider;
 import com.tyron.completion.java.FindTypeDeclarationAt;
-import com.tyron.completion.java.ParseTask;
+import com.tyron.completion.java.compiler.ParseTask;
 import com.tyron.completion.java.util.ActionUtil;
 import com.tyron.completion.java.util.JavaParserUtil;
 import com.tyron.completion.model.Position;
@@ -31,8 +28,6 @@ import org.openjdk.source.util.TreePath;
 import org.openjdk.source.util.Trees;
 
 import java.nio.file.Path;
-import java.time.Duration;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
@@ -41,7 +36,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
-public class OverrideInheritedMethod implements Rewrite {
+public class OverrideInheritedMethod implements JavaRewrite {
 
     final String superClassName, methodName;
     final String[] erasedParameterTypes;
@@ -80,11 +75,7 @@ public class OverrideInheritedMethod implements Rewrite {
             ExecutableType parameterizedType =
                     (ExecutableType) types.asMemberOf((DeclaredType) thisClass.asType(),
                             superMethod);
-            int indent = EditHelper.indent(task.task, task.root(), thisTree);
-            if (indent == 1) {
-                indent = 4;
-            }
-            indent += 4;
+            int indent = EditHelper.indent(task.task, task.root(), thisTree) + 1;
 
             Set<String> importedClasses = new HashSet<>();
             Set<String> typesToImport = ActionUtil.getTypesToImport(parameterizedType);
@@ -107,9 +98,8 @@ public class OverrideInheritedMethod implements Rewrite {
                 methodDeclaration = EditHelper.printMethod(superMethod, parameterizedType,
                         superMethod);
             }
-            int tabCount = indent / 4;
 
-            String tabs = Strings.repeat("\t", tabCount);
+            String tabs = Strings.repeat("\t", indent);
             String text = JavaParserUtil.prettyPrint(methodDeclaration, className -> false);
             text = tabs + text.replace("\n", "\n" + tabs) + "\n\n";
 
@@ -117,7 +107,7 @@ public class OverrideInheritedMethod implements Rewrite {
 
             for (String s : typesToImport) {
                 if (!ActionUtil.hasImport(task.root(), s)) {
-                    Rewrite addImport = new AddImport(file.toFile(), s);
+                    JavaRewrite addImport = new AddImport(file.toFile(), s);
                     Map<Path, TextEdit[]> rewrite = addImport.rewrite(compiler);
                     TextEdit[] textEdits = rewrite.get(file);
                     if (textEdits != null) {

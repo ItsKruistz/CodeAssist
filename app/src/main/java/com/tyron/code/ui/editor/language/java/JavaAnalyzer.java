@@ -11,14 +11,13 @@ import com.tyron.builder.project.Project;
 import com.tyron.builder.project.api.JavaModule;
 import com.tyron.builder.project.api.Module;
 import com.tyron.code.BuildConfig;
-import com.tyron.code.lint.DefaultLintClient;
 import com.tyron.code.ui.editor.language.HighlightUtil;
 import com.tyron.code.ui.project.ProjectManager;
 import com.tyron.common.util.Debouncer;
 import com.tyron.completion.index.CompilerService;
-import com.tyron.completion.java.CompileTask;
-import com.tyron.completion.java.CompilerContainer;
-import com.tyron.completion.java.JavaCompilerService;
+import com.tyron.completion.java.compiler.CompileTask;
+import com.tyron.completion.java.compiler.CompilerContainer;
+import com.tyron.completion.java.compiler.JavaCompilerService;
 import com.tyron.completion.java.JavaCompilerProvider;
 import com.tyron.completion.java.provider.CompletionEngine;
 import com.tyron.completion.java.util.ErrorCodes;
@@ -49,12 +48,9 @@ import java.util.stream.Collectors;
 
 import io.github.rosemoe.sora.data.BlockLine;
 import io.github.rosemoe.sora.data.NavigationItem;
-import io.github.rosemoe.sora.data.Span;
 import io.github.rosemoe.sora.langs.java.JavaCodeAnalyzer;
 import io.github.rosemoe.sora.langs.java.JavaTextTokenizer;
 import io.github.rosemoe.sora.langs.java.Tokens;
-import io.github.rosemoe.sora.text.CharPosition;
-import io.github.rosemoe.sora.text.Indexer;
 import io.github.rosemoe.sora.text.LineNumberCalculator;
 import io.github.rosemoe.sora.text.TextAnalyzeResult;
 import io.github.rosemoe.sora.text.TextAnalyzer;
@@ -62,7 +58,6 @@ import io.github.rosemoe.sora.widget.CodeEditor;
 import io.github.rosemoe.sora.widget.EditorColorScheme;
 import kotlin.Unit;
 import kotlin.jvm.functions.Function0;
-import kotlin.jvm.functions.Function1;
 
 public class JavaAnalyzer extends JavaCodeAnalyzer {
     private static final Debouncer sDebouncer = new Debouncer(Duration.ofMillis(700));
@@ -129,7 +124,7 @@ public class JavaAnalyzer extends JavaCodeAnalyzer {
         // compiling multiple files at the same time
         if (mPreferences.getBoolean("code_editor_error_highlight", true) && !CompletionEngine.isIndexing()) {
             JavaCompilerService service = getCompiler(editor);
-            if (service != null && service.isReady()) {
+            if (service != null) {
                 try {
                     SourceFileObject sourceFileObject =
                             new SourceFileObject(editor.getCurrentFile().toPath(),
@@ -140,7 +135,8 @@ public class JavaAnalyzer extends JavaCodeAnalyzer {
                         if (!cancel.invoke()) {
                             List<DiagnosticWrapper> collect =
                                     task.diagnostics.stream()
-                                            .map(d -> modifyDiagnostic(task, d))
+                                            .map(DiagnosticWrapper::new)
+                                           // .map(d -> modifyDiagnostic(task, d))
                                             .collect(Collectors.toList());
                             editor.setDiagnostics(collect);
                         }

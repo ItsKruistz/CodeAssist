@@ -2,7 +2,7 @@ package com.tyron.completion.java.rewrite;
 
 import com.google.common.collect.ImmutableMap;
 import com.tyron.completion.java.CompilerProvider;
-import com.tyron.completion.java.ParseTask;
+import com.tyron.completion.java.compiler.ParseTask;
 import com.tyron.completion.java.util.ActionUtil;
 import com.tyron.completion.model.Range;
 import com.tyron.completion.model.TextEdit;
@@ -12,9 +12,8 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import java.util.TreeMap;
 
-public class AddTryCatch implements Rewrite {
+public class AddTryCatch implements JavaRewrite {
 
     private final Path file;
     private final String contents;

@@ -19,7 +19,6 @@ import org.xmlpull.v1.XmlPullParserException;
 import java.io.File;
 import java.io.IOException;
 import java.io.StringReader;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
@@ -39,13 +38,13 @@ public class ResourceDrawableParser {
     }
 
     public Map<String, DrawableValue> getDefaultDrawables() {
+        Map<String, DrawableValue> map = new HashMap<>();
         File defaultValues = new File(mResourceDirectory, "drawable");
         File[] xmlFiles = defaultValues.listFiles();
         if (xmlFiles == null) {
-            return Collections.emptyMap();
+            return map;
         }
 
-        Map<String, DrawableValue> map = new HashMap<>();
         for (File file : xmlFiles) {
             DrawableValue value = null;
 

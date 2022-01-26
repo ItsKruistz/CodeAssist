@@ -6,11 +6,9 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
 import com.tyron.builder.project.api.JavaModule;
-import com.tyron.code.service.IndexService;
 import com.tyron.completion.index.CompilerService;
 import com.tyron.completion.java.JavaCompilerProvider;
-import com.tyron.completion.java.JavaCompilerService;
-import com.tyron.completion.java.provider.CompletionEngine;
+import com.tyron.completion.java.compiler.JavaCompilerService;
 import com.tyron.lint.api.Context;
 import com.tyron.lint.api.Issue;
 import com.tyron.lint.api.Lint;
@@ -36,10 +34,6 @@ public class DefaultLintClient extends LintClient {
     }
 
     public void scan(File file) {
-        if (!mCompiler.isReady()) {
-            return;
-        }
-
         mIssues.clear();
         mLint.scanFile(file);
     }

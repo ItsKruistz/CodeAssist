@@ -6,11 +6,15 @@ import android.util.AttributeSet;
 import com.tyron.actions.DataContext;
 import com.tyron.editor.Caret;
 import com.tyron.editor.CharPosition;
+import com.tyron.editor.Content;
 import com.tyron.editor.Editor;
 
 import io.github.rosemoe.sora.widget.CodeEditor;
 
 public class CodeEditorView extends CodeEditor implements Editor {
+
+    private boolean mIsBackgroundAnalysisEnabled;
+
     public CodeEditorView(Context context) {
         super(DataContext.wrap(context));
     }
@@ -72,5 +76,26 @@ public class CodeEditorView extends CodeEditor implements Editor {
     @Override
     public Caret getCaret() {
         return new CursorWrapper(getCursor());
+    }
+
+    @Override
+    public Content getContent() {
+        return new ContentWrapper(CodeEditorView.this.getText());
+    }
+
+    @Override
+    public void analyze(boolean runBgAnalyzer) {
+        if (!mIsBackgroundAnalysisEnabled && runBgAnalyzer) {
+            return;
+        }
+        super.analyze(runBgAnalyzer);
+    }
+
+    /**
+     * Background analysis can sometimes be expensive.
+     * Set whether background analysis should be enabled for this editor.
+     */
+    public void setBackgroundAnalysisEnabled(boolean enabled) {
+        mIsBackgroundAnalysisEnabled = enabled;
     }
 }

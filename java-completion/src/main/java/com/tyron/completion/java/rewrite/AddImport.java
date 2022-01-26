@@ -6,7 +6,7 @@ import org.openjdk.source.util.Trees;
 
 import com.tyron.completion.java.CompilerProvider;
 import com.tyron.completion.model.Position;
-import com.tyron.completion.java.ParseTask;
+import com.tyron.completion.java.compiler.ParseTask;
 
 import java.nio.file.Path;
 import java.util.Collections;
@@ -20,7 +20,7 @@ import org.openjdk.source.tree.ImportTree;
 
 import java.io.File;
 
-public class AddImport implements Rewrite {
+public class AddImport implements JavaRewrite {
     
     private final String className;
     private final File currentFile;

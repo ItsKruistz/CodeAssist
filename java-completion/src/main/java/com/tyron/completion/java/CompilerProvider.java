@@ -1,6 +1,9 @@
 package com.tyron.completion.java;
 
 
+import com.tyron.completion.java.compiler.CompilerContainer;
+import com.tyron.completion.java.compiler.ParseTask;
+
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Collection;
@@ -11,8 +14,6 @@ import java.util.Set;
 import org.openjdk.javax.tools.JavaFileObject;
 
 public interface CompilerProvider {
-
-    boolean isReady();
 
     Set<String> imports();
     

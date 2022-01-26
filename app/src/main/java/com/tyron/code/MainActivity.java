@@ -6,17 +6,15 @@ import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 
 import com.tyron.actions.ActionManager;
-import com.tyron.actions.AnAction;
-import com.tyron.actions.AnActionEvent;
 import com.tyron.code.ui.editor.action.CloseAllEditorAction;
 import com.tyron.code.ui.editor.action.CloseFileEditorAction;
 import com.tyron.code.ui.editor.action.CloseOtherEditorAction;
 import com.tyron.code.ui.editor.action.DiagnosticInfoAction;
 import com.tyron.code.ui.editor.action.PreviewLayoutAction;
 import com.tyron.code.ui.file.action.NewFileActionGroup;
-import com.tyron.code.ui.file.action.file.CreateDirectoryAction;
 import com.tyron.code.ui.file.action.file.DeleteFileAction;
 import com.tyron.code.ui.main.action.compile.CompileActionGroup;
+import com.tyron.code.ui.main.action.debug.DebugActionGroup;
 import com.tyron.code.ui.main.action.other.FormatAction;
 import com.tyron.code.ui.main.action.other.OpenSettingsAction;
 import com.tyron.code.ui.main.action.project.ProjectActionGroup;
@@ -26,8 +24,9 @@ import com.tyron.completion.java.CompletionModule;
 import com.tyron.completion.java.JavaCompilerProvider;
 import com.tyron.completion.java.JavaCompletionProvider;
 import com.tyron.completion.main.CompletionEngine;
+import com.tyron.completion.xml.XmlCompletionModule;
 import com.tyron.completion.xml.providers.AndroidManifestCompletionProvider;
-import com.tyron.completion.xml.providers.XmlCompletionProvider;
+import com.tyron.completion.xml.providers.LayoutXmlCompletionProvider;
 import com.tyron.completion.xml.XmlIndexProvider;
 
 public class MainActivity extends AppCompatActivity {
@@ -44,7 +43,7 @@ public class MainActivity extends AppCompatActivity {
                 index.registerIndexProvider(JavaCompilerProvider.KEY, new JavaCompilerProvider());
                 index.registerIndexProvider(XmlIndexProvider.KEY, new XmlIndexProvider());
                 engine.registerCompletionProvider(new JavaCompletionProvider());
-                engine.registerCompletionProvider(new XmlCompletionProvider());
+                engine.registerCompletionProvider(new LayoutXmlCompletionProvider());
                 engine.registerCompletionProvider(new AndroidManifestCompletionProvider());
             }
         });
@@ -56,6 +55,7 @@ public class MainActivity extends AppCompatActivity {
             manager.registerAction(PreviewLayoutAction.ID, new PreviewLayoutAction());
             manager.registerAction(OpenSettingsAction.ID, new OpenSettingsAction());
             manager.registerAction(FormatAction.ID, new FormatAction());
+            manager.registerAction(DebugActionGroup.ID, new DebugActionGroup());
 
             // editor tab actions
             manager.registerAction(CloseFileEditorAction.ID, new CloseFileEditorAction());
@@ -71,6 +71,9 @@ public class MainActivity extends AppCompatActivity {
 
             // java actions
             CompletionModule.registerActions(manager);
+
+            // xml actions
+            XmlCompletionModule.registerActions(manager);
         });
         startupManager.startup();
 

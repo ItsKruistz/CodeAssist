@@ -7,20 +7,20 @@ import com.tyron.actions.AnAction;
 import com.tyron.actions.AnActionEvent;
 import com.tyron.actions.CommonDataKeys;
 import com.tyron.actions.Presentation;
-import com.tyron.completion.java.CompileTask;
-import com.tyron.completion.java.CompilerContainer;
-import com.tyron.completion.java.JavaCompilerService;
+import com.tyron.completion.java.compiler.CompileTask;
+import com.tyron.completion.java.compiler.CompilerContainer;
+import com.tyron.completion.java.compiler.JavaCompilerService;
 import com.tyron.completion.java.R;
 import com.tyron.completion.java.action.CommonJavaContextKeys;
-import com.tyron.completion.java.action.util.RewriteUtil;
+import com.tyron.completion.util.RewriteUtil;
 import com.tyron.completion.java.rewrite.IntroduceLocalVariable;
-import com.tyron.completion.java.rewrite.Rewrite;
+import com.tyron.completion.java.rewrite.JavaRewrite;
 import com.tyron.completion.java.util.ActionUtil;
 import com.tyron.editor.Editor;
 
 import org.openjdk.javax.lang.model.element.Element;
 import org.openjdk.javax.lang.model.element.ExecutableElement;
-import org.openjdk.javax.lang.model.type.TypeKind;
+import org.openjdk.javax.lang.model.type.ErrorType;
 import org.openjdk.javax.lang.model.type.TypeMirror;
 import org.openjdk.source.util.SourcePositions;
 import org.openjdk.source.util.TreePath;
@@ -50,9 +50,6 @@ public class IntroduceLocalVariableAction extends AnAction {
         if (compiler == null) {
             return;
         }
-        if (!compiler.isReady()) {
-            return;
-        }
 
         File file = event.getData(CommonDataKeys.FILE);
         if (file == null) {
@@ -77,10 +74,10 @@ public class IntroduceLocalVariableAction extends AnAction {
         Editor editor = e.getData(CommonDataKeys.EDITOR);
         TreePath currentPath = e.getData(CommonJavaContextKeys.CURRENT_PATH);
         File file = e.getData(CommonDataKeys.FILE);
-        JavaCompilerService compiler = e.getData(CommonJavaContextKeys.COMPILER);
+        JavaCompilerService compiler = e.getRequiredData(CommonJavaContextKeys.COMPILER);
         CompilerContainer cachedContainer = compiler.getCachedContainer();
 
-        Rewrite rewrite = cachedContainer.get(task -> {
+        JavaRewrite rewrite = cachedContainer.get(task -> {
             if (task != null) {
                 return performInternal(task, currentPath, file);
             }
@@ -92,19 +89,38 @@ public class IntroduceLocalVariableAction extends AnAction {
         }
     }
 
-    private Rewrite performInternal(CompileTask task, TreePath path, File file) {
-        Element element = Trees.instance(task.task).getElement(path);
+    private JavaRewrite performInternal(CompileTask task, TreePath path, File file) {
+        Trees trees = Trees.instance(task.task);
+        Element element = trees.getElement(path);
+        TypeMirror typeMirror = trees.getTypeMirror(path);
+
+        if (typeMirror instanceof ErrorType) {
+            // information is incomplete and type cannot be determined, default to Object
+            typeMirror = task.task.getElements()
+                    .getTypeElement("java.lang.Object")
+                    .asType();
+        }
+        if (typeMirror != null) {
+            return rewrite(typeMirror, trees, path, file, element.getSimpleName().toString());
+        }
+
         if (element instanceof ExecutableElement) {
             TypeMirror returnType = ActionUtil.getReturnType(task.task, path,
                     (ExecutableElement) element);
-            if (returnType.getKind() != TypeKind.VOID) {
-                SourcePositions pos = Trees.instance(task.task).getSourcePositions();
-                long startPosition = pos.getStartPosition(path.getCompilationUnit(),
-                        path.getLeaf());
-                return new IntroduceLocalVariable(file.toPath(),
-                        element.getSimpleName().toString(), returnType, startPosition);
-            }
+            return rewrite(returnType, trees, path, file, element.getSimpleName().toString());
         }
         return null;
+    }
+
+    private JavaRewrite rewrite(TypeMirror type,
+                                Trees trees,
+                                TreePath path,
+                                File file,
+                                String methodName) {
+        SourcePositions pos = trees.getSourcePositions();
+        long startPosition = pos.getStartPosition(path.getCompilationUnit(),
+                path.getLeaf());
+        return new IntroduceLocalVariable(file.toPath(),
+                methodName, type, startPosition);
     }
 }

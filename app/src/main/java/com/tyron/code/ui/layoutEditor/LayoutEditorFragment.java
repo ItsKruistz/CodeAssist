@@ -10,6 +10,7 @@ import android.graphics.Point;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.Display;
+import android.view.DragEvent;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -43,6 +44,7 @@ import com.flipkart.android.proteus.value.Value;
 import com.flipkart.android.proteus.view.UnknownViewGroup;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.google.common.collect.ImmutableMap;
+import com.tyron.code.ui.layoutEditor.model.EditorDragState;
 import com.tyron.code.ui.project.ProjectManager;
 import com.tyron.builder.project.Project;
 import com.tyron.builder.project.api.AndroidModule;
@@ -97,8 +99,10 @@ public class LayoutEditorFragment extends Fragment implements ProjectManager.OnP
     private boolean isDumb;
 
     private final View.OnLongClickListener mOnLongClickListener = v -> {
+        ClipData clipData = ClipData.newPlainText("", "");
         View.DragShadowBuilder shadowBuilder = new View.DragShadowBuilder(v);
-        ViewCompat.startDragAndDrop(v, ClipData.newPlainText("", ""), shadowBuilder, v, 0);
+        EditorDragState state = EditorDragState.fromView(v);
+        ViewCompat.startDragAndDrop(v, clipData, shadowBuilder, state, 0);
         return true;
     };
 
@@ -227,7 +231,7 @@ public class LayoutEditorFragment extends Fragment implements ProjectManager.OnP
                     setDragListeners(((ViewGroup) view));
                 }
                 setClickListeners(view);
-                mEditorRoot.postDelayed(() -> mEditorRoot.requestLayout(), 100);
+                mEditorRoot.postDelayed(() -> mEditorRoot.invalidate(), 300);
 
                 if (parent instanceof ProteusView && view instanceof ProteusView) {
                     ProteusView proteusParent = (ProteusView) parent;
@@ -257,6 +261,32 @@ public class LayoutEditorFragment extends Fragment implements ProjectManager.OnP
         } else {
             createInflater();
         }
+
+        view.setOnDragListener((v, event) -> {
+            if (!(event.getLocalState() instanceof EditorDragState)) {
+                return false;
+            }
+
+            if (event.getAction() != DragEvent.ACTION_DROP) {
+                return true;
+            }
+
+            EditorDragState state = (EditorDragState) event.getLocalState();
+            if (state.isExistingView()) {
+                View dragged = state.getView();
+                ViewGroup parent = (ViewGroup) dragged.getParent();
+                if (parent != null) {
+                    parent.removeView(dragged);
+
+                    if (parent instanceof ProteusView && dragged instanceof ProteusView) {
+                        ProteusHelper.removeChildFromLayout(((ProteusView) parent),
+                                ((ProteusView) dragged));
+                    }
+                    return true;
+                }
+            }
+            return false;
+        });
     }
 
     @Override

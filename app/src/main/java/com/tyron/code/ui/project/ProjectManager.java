@@ -18,9 +18,9 @@ import com.tyron.code.ApplicationLoader;
 import com.tyron.code.template.CodeTemplate;
 import com.tyron.code.util.ProjectUtils;
 import com.tyron.completion.index.CompilerService;
-import com.tyron.completion.java.CompilerContainer;
+import com.tyron.completion.java.compiler.CompilerContainer;
 import com.tyron.completion.java.JavaCompilerProvider;
-import com.tyron.completion.java.JavaCompilerService;
+import com.tyron.completion.java.compiler.JavaCompilerService;
 import com.tyron.completion.java.provider.CompletionEngine;
 import com.tyron.completion.xml.XmlIndexProvider;
 import com.tyron.completion.xml.XmlRepository;
@@ -104,7 +104,12 @@ public class ProjectManager {
         }
 
         // Index the project after downloading dependencies so it will get added to classpath
-        module.index();
+        try {
+            mCurrentProject.open();
+        } catch (IOException exception) {
+            logger.warning("Failed to open project: " + exception.getMessage());
+            return;
+        }
         mProjectOpenListeners.forEach(it -> it.onProjectOpen(mCurrentProject));
 
         if (module instanceof AndroidModule) {

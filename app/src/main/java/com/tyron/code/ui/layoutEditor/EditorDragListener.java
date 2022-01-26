@@ -1,18 +1,24 @@
 package com.tyron.code.ui.layoutEditor;
 
 import android.animation.LayoutTransition;
+import android.graphics.Rect;
 import android.util.Log;
 import android.view.DragEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewParent;
 import android.widget.LinearLayout;
 
 import androidx.annotation.NonNull;
 
 import com.flipkart.android.proteus.ProteusView;
 import com.tyron.code.BuildConfig;
+import com.tyron.code.ui.layoutEditor.model.EditorDragState;
 import com.tyron.code.ui.layoutEditor.model.EditorShadowView;
 import com.tyron.code.ui.layoutEditor.model.ViewPalette;
+import com.tyron.layoutpreview.BoundaryDrawingFrameLayout;
+
+import java.util.Objects;
 
 public class EditorDragListener implements View.OnDragListener {
 
@@ -58,6 +64,12 @@ public class EditorDragListener implements View.OnDragListener {
             return false;
         }
 
+        if (!(event.getLocalState() instanceof EditorDragState)) {
+            return false;
+        }
+
+        EditorDragState dragState = (EditorDragState) event.getLocalState();
+
         ViewGroup hostView = (ViewGroup) view;
         switch (event.getAction()) {
             case DragEvent.ACTION_DRAG_LOCATION:
@@ -74,26 +86,37 @@ public class EditorDragListener implements View.OnDragListener {
             case DragEvent.ACTION_DROP:
                 ensureNoParent(mEditorShadow);
 
-                Object state = event.getLocalState();
+                if (dragState.isExistingView()) {
 
-                if (state instanceof ProteusView) {
-                    try {
-                        addProteusView(hostView, ((ProteusView) state), event);
-                    } catch (Throwable e) {
-                        if (BuildConfig.DEBUG) {
-                            Log.e(TAG, "Unable to add view", e);
+                    if (getParentOfType(hostView, BoundaryDrawingFrameLayout.class) == null) {
+                        ensureNoParent(Objects.requireNonNull(dragState.getView()));
+                        return true;
+                    }
+
+                    if (dragState.getView() instanceof ProteusView) {
+                        boolean added = addProteusView(hostView, (ProteusView) dragState.getView(), event);
+
+                        // the view cannot be added, add it back to its previous parent
+                        if (!added) {
+                            ensureNoParent(dragState.getView());
+                            dragState.getParent().addView(dragState.getView(), dragState.getIndex());
+
+                            // inform the main editor
+                            if (mDelegate != null) {
+                                mDelegate.onAddView(dragState.getParent(), dragState.getView());
+                            }
                         }
                     }
-                } else if (state instanceof ViewPalette) {
-                    addPalette(hostView, ((ViewPalette) state), event);
+                } else {
+                    addPalette(hostView, dragState.getPalette(), event);
                 }
                 break;
         }
         return true;
     }
 
-    private void addProteusView(ViewGroup parent, ProteusView view, DragEvent event) {
-        addView(parent, view.getAsView(), event);
+    private boolean addProteusView(ViewGroup parent, ProteusView view, DragEvent event) {
+        return addView(parent, view.getAsView(), event);
     }
 
     private void addPalette(ViewGroup parent, ViewPalette palette, DragEvent event) {
@@ -103,27 +126,32 @@ public class EditorDragListener implements View.OnDragListener {
         }
     }
 
-    private void addView(ViewGroup parent, View child, DragEvent event) {
-        ensureNoParent(child);
-        int index = parent.getChildCount();
-        if (parent instanceof LinearLayout) {
-            if (((LinearLayout) parent).getOrientation() == LinearLayout.VERTICAL) {
-                index = getVerticalIndexForEvent(parent, event);
-            } else {
-                index = getHorizontalIndexForEvent(parent, event);
+    private boolean addView(ViewGroup parent, View child, DragEvent event) {
+        try {
+            ensureNoParent(child);
+            int index = parent.getChildCount();
+            if (parent instanceof LinearLayout) {
+                if (((LinearLayout) parent).getOrientation() == LinearLayout.VERTICAL) {
+                    index = getVerticalIndexForEvent(parent, event);
+                } else {
+                    index = getHorizontalIndexForEvent(parent, event);
+                }
             }
-        }
 
-        if (mEditorShadow.equals(child)) {
-            LayoutTransition transition = parent.getLayoutTransition();
-            parent.setLayoutTransition(null);
-            parent.addView(child, index);
-            parent.setLayoutTransition(transition);
-        } else {
-            parent.addView(child, index);
-            if (mDelegate != null) {
-                mDelegate.onAddView(parent, child);
+            if (mEditorShadow.equals(child)) {
+                LayoutTransition transition = parent.getLayoutTransition();
+                parent.setLayoutTransition(null);
+                parent.addView(child, index);
+                parent.setLayoutTransition(transition);
+            } else {
+                parent.addView(child, index);
+                if (mDelegate != null) {
+                    mDelegate.onAddView(parent, child);
+                }
             }
+            return true;
+        } catch (Throwable e) {
+            return false;
         }
     }
 
@@ -184,5 +212,18 @@ public class EditorDragListener implements View.OnDragListener {
         int length = higher - lower;
         int middle = length / 2;
         return lower + middle;
+    }
+
+    private View getParentOfType(View view, Class<? extends View> type) {
+        ViewParent current = view.getParent();
+        while (current != null) {
+            if (current.getClass().isAssignableFrom(type)) {
+                return (View) current;
+            }
+
+            current = current.getParent();
+        }
+
+        return null;
     }
 }

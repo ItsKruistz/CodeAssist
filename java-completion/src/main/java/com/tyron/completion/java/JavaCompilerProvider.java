@@ -1,10 +1,12 @@
 package com.tyron.completion.java;
 
+import com.tyron.builder.BuildModule;
+import com.tyron.builder.compiler.dex.D8Task;
 import com.tyron.builder.project.Project;
 import com.tyron.builder.project.api.JavaModule;
 import com.tyron.builder.project.api.Module;
-import com.tyron.common.SharedPreferenceKeys;
 import com.tyron.completion.index.CompilerProvider;
+import com.tyron.completion.java.compiler.JavaCompilerService;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -44,10 +46,10 @@ public class JavaCompilerProvider extends CompilerProvider<JavaCompilerService> 
         }
 
         Set<File> paths = new HashSet<>();
-        paths.addAll(module.getJavaFiles().values());
-        paths.addAll(module.getLibraries());
 
         for (Module dependency : dependencies) {
+            dependency.clear();
+            dependency.index();
             if (dependency instanceof JavaModule) {
                 paths.addAll(((JavaModule) dependency).getJavaFiles().values());
                 paths.addAll(((JavaModule) dependency).getLibraries());

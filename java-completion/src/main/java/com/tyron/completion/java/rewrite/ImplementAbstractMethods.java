@@ -1,16 +1,14 @@
 package com.tyron.completion.java.rewrite;
 
-import android.util.Log;
-
 import com.github.javaparser.ast.body.MethodDeclaration;
 import com.google.common.base.Strings;
-import com.tyron.completion.java.CompileTask;
-import com.tyron.completion.java.CompilerContainer;
+import com.tyron.completion.java.compiler.CompileTask;
+import com.tyron.completion.java.compiler.CompilerContainer;
 import com.tyron.completion.java.CompilerProvider;
 import com.tyron.completion.java.FindNewTypeDeclarationAt;
 import com.tyron.completion.java.FindTypeDeclarationAt;
-import com.tyron.completion.java.JavaCompilerService;
-import com.tyron.completion.java.ParseTask;
+import com.tyron.completion.java.compiler.JavaCompilerService;
+import com.tyron.completion.java.compiler.ParseTask;
 import com.tyron.completion.java.provider.FindHelper;
 import com.tyron.completion.java.util.ActionUtil;
 import com.tyron.completion.java.util.JavaParserUtil;
@@ -23,10 +21,8 @@ import org.openjdk.javax.lang.model.element.ElementKind;
 import org.openjdk.javax.lang.model.element.ExecutableElement;
 import org.openjdk.javax.lang.model.element.Modifier;
 import org.openjdk.javax.lang.model.element.TypeElement;
-import org.openjdk.javax.lang.model.element.VariableElement;
 import org.openjdk.javax.lang.model.type.DeclaredType;
 import org.openjdk.javax.lang.model.type.ExecutableType;
-import org.openjdk.javax.lang.model.type.TypeMirror;
 import org.openjdk.javax.lang.model.util.Elements;
 import org.openjdk.javax.lang.model.util.Types;
 import org.openjdk.javax.tools.JavaFileObject;
@@ -47,9 +43,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.StringJoiner;
 
-import javaslang.collection.Tree;
-
-public class ImplementAbstractMethods implements Rewrite {
+public class ImplementAbstractMethods implements JavaRewrite {
 
     private static final String TAG = ImplementAbstractMethods.class.getSimpleName();
 
@@ -85,11 +79,6 @@ public class ImplementAbstractMethods implements Rewrite {
 
     @Override
     public Map<Path, TextEdit[]> rewrite(CompilerProvider compiler) {
-        if (!compiler.isReady()) {
-            Log.w(TAG, "Compiler is in use, returning empty map");
-            return Collections.emptyMap();
-        }
-
         List<TextEdit> edits = new ArrayList<>();
         List<TextEdit> importEdits = new ArrayList<>();
 
@@ -118,21 +107,19 @@ public class ImplementAbstractMethods implements Rewrite {
             DeclaredType thisType = (DeclaredType) element.asType();
 
             Set<String> importedClasses = new HashSet<>();
-            task.root().getImports().stream().map(ImportTree::getQualifiedIdentifier).map(Object::toString).forEach(importedClasses::add);
+            task.root().getImports().stream()
+                    .map(ImportTree::getQualifiedIdentifier)
+                    .map(Object::toString)
+                    .forEach(importedClasses::add);
             Set<String> typesToImport = new HashSet<>();
 
-            int indent = EditHelper.indent(task.task, task.root(), thisTree);
-            if (indent == 1) {
-                indent = 4;
-            }
-            indent += 4;
+            int indent = EditHelper.indent(task.task, task.root(), thisTree) + 1;
+            String tabs = Strings.repeat("\t", indent);
 
             for (Element member : elements.getAllMembers(thisClass)) {
                 if (member.getKind() == ElementKind.METHOD && member.getModifiers().contains(Modifier.ABSTRACT)) {
                     ExecutableElement method = (ExecutableElement) member;
                     MethodTree source = findSource(compiler, task, method);
-                    int tabCount = indent / 4;
-                    String tabs = Strings.repeat("\t", tabCount);
                     ExecutableType parameterizedType = (ExecutableType) types.asMemberOf(thisType
                             , method);
 
@@ -149,21 +136,24 @@ public class ImplementAbstractMethods implements Rewrite {
                     }
 
                     String text = JavaParserUtil.prettyPrint(methodDeclaration, className -> false);
-
                     text = tabs + text.replace("\n", "\n" + tabs);
-                    text += "\n";
+                    if (insertText.length() != 0) {
+                        text = "\n" + text;
+                    }
+
                     insertText.add(text);
                 }
             }
 
             Position insert = EditHelper.insertAtEndOfClass(task.task, task.root(), thisTree);
+            insert.line -= 1;
             edits.add(new TextEdit(new Range(insert, insert), insertText + "\n"));
             edits.addAll(importEdits);
 
             for (String type : typesToImport) {
                 String fqn = ActionUtil.removeDiamond(type);
                 if (!ActionUtil.hasImport(task.root(), fqn)) {
-                    Rewrite addImport = new AddImport(file.toFile(), fqn);
+                    JavaRewrite addImport = new AddImport(file.toFile(), fqn);
                     Map<Path, TextEdit[]> rewrite = addImport.rewrite(compiler);
                     TextEdit[] textEdits = rewrite.get(file);
                     if (textEdits != null) {

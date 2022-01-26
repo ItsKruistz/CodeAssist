@@ -1,15 +1,16 @@
 package com.tyron.completion.java.rewrite;
 
+import static com.tyron.completion.java.patterns.JavacTreePatterns.classTree;
+import static com.tyron.completion.java.patterns.JavacTreePatterns.method;
+
 import androidx.annotation.NonNull;
 
 import com.github.javaparser.ast.Modifier.Keyword;
 import com.github.javaparser.ast.NodeList;
 import com.github.javaparser.ast.body.MethodDeclaration;
-import com.github.javaparser.ast.body.Parameter;
 import com.github.javaparser.ast.expr.AnnotationExpr;
 import com.github.javaparser.ast.expr.BooleanLiteralExpr;
 import com.github.javaparser.ast.expr.Expression;
-import com.github.javaparser.ast.expr.FieldAccessExpr;
 import com.github.javaparser.ast.expr.IntegerLiteralExpr;
 import com.github.javaparser.ast.expr.MethodCallExpr;
 import com.github.javaparser.ast.expr.NullLiteralExpr;
@@ -17,13 +18,9 @@ import com.github.javaparser.ast.expr.SuperExpr;
 import com.github.javaparser.ast.nodeTypes.NodeWithSimpleName;
 import com.github.javaparser.ast.stmt.BlockStmt;
 import com.github.javaparser.ast.stmt.ReturnStmt;
-import com.github.javaparser.ast.stmt.Statement;
 import com.github.javaparser.ast.type.PrimitiveType;
 import com.github.javaparser.ast.type.Type;
-import com.github.javaparser.printer.configuration.ConfigurationOption;
-import com.github.javaparser.printer.configuration.DefaultConfigurationOption;
-import com.github.javaparser.printer.configuration.DefaultPrinterConfiguration;
-import com.github.javaparser.printer.configuration.PrinterConfiguration;
+import com.tyron.completion.java.patterns.ClassTreePattern;
 import com.tyron.completion.java.util.ActionUtil;
 import com.tyron.completion.java.util.JavaParserTypesUtil;
 import com.tyron.completion.java.util.JavaParserUtil;
@@ -31,14 +28,12 @@ import com.tyron.completion.model.Position;
 import com.tyron.completion.model.Range;
 import com.tyron.completion.model.TextEdit;
 
+import org.jetbrains.kotlin.com.intellij.util.ProcessingContext;
 import org.openjdk.javax.lang.model.element.ExecutableElement;
 import org.openjdk.javax.lang.model.element.Modifier;
 import org.openjdk.javax.lang.model.element.Name;
 import org.openjdk.javax.lang.model.element.TypeElement;
-import org.openjdk.javax.lang.model.element.TypeParameterElement;
 import org.openjdk.javax.lang.model.element.VariableElement;
-import org.openjdk.javax.lang.model.type.ArrayType;
-import org.openjdk.javax.lang.model.type.DeclaredType;
 import org.openjdk.javax.lang.model.type.ExecutableType;
 import org.openjdk.javax.lang.model.type.TypeKind;
 import org.openjdk.javax.lang.model.type.TypeMirror;
@@ -46,13 +41,16 @@ import org.openjdk.source.tree.ClassTree;
 import org.openjdk.source.tree.CompilationUnitTree;
 import org.openjdk.source.tree.LineMap;
 import org.openjdk.source.tree.MethodTree;
+import org.openjdk.source.tree.NewClassTree;
 import org.openjdk.source.tree.Tree;
 import org.openjdk.source.tree.VariableTree;
 import org.openjdk.source.util.JavacTask;
 import org.openjdk.source.util.SourcePositions;
 import org.openjdk.source.util.Trees;
 import org.openjdk.tools.javac.code.Symbol;
+import org.openjdk.tools.javac.tree.JCTree;
 
+import java.io.IOException;
 import java.util.List;
 import java.util.Optional;
 import java.util.StringJoiner;
@@ -280,8 +278,7 @@ public class EditHelper {
     }
 
     public static com.github.javaparser.ast.type.Type printType(TypeMirror type, boolean fqn) {
-        Type type1 = JavaParserTypesUtil.toType(type);
-        return type1;
+        return JavaParserTypesUtil.toType(type);
     }
 
     public static String printTypeParameters(List<? extends TypeMirror> arguments) {
@@ -324,12 +321,62 @@ public class EditHelper {
         return s;
     }
 
-    public static int indent(JavacTask task, CompilationUnitTree root, ClassTree leaf) {
+
+    private static final ClassTreePattern INSIDE_METHOD =  classTree()
+            .inside(NewClassTree.class)
+            .withParent(method());
+
+    public static int indent(JavacTask task, CompilationUnitTree root, Tree leaf) {
+        Trees trees = Trees.instance(task);
+        ProcessingContext context = new ProcessingContext();
+        context.put("trees", trees);
+        context.put("root", root);
+        context.put("elements", task.getElements());
+        if (INSIDE_METHOD.accepts(leaf, context)) {
+            leaf = trees.getPath(root, leaf)
+                    .getParentPath()
+                    .getParentPath()
+                    .getLeaf();
+        }
+        return indentInternal(task, root, leaf);
+    }
+
+    private static int indentInternal(JavacTask task, CompilationUnitTree root, Tree leaf) {
         SourcePositions pos = Trees.instance(task).getSourcePositions();
         LineMap lines = root.getLineMap();
         long startClass = pos.getStartPosition(root, leaf);
-        long startLine = lines.getStartPosition(lines.getLineNumber(startClass));
-        return (int) (startClass - startLine);
+        long line = lines.getLineNumber(startClass);
+        long column = lines.getColumnNumber(startClass);
+        long startLine = lines.getStartPosition(line);
+        int indent = (int) (startClass - startLine);
+
+        try {
+            String contents = root.getSourceFile().getCharContent(true).toString();
+            String[] split = contents.split("\n");
+            String lineString = split[(int) line - 1];
+            String indentString = lineString.substring(0, (int) column);
+
+            int newIndent = 0;
+            int spaceCount = 0;
+            char[] chars = indentString.toCharArray();
+            for (char c : chars) {
+                if (c == '\t') {
+                    newIndent++;
+                } else if (c == ' ') {
+                    if (spaceCount == 3) {
+                        spaceCount = 0;
+                        newIndent++;
+                    } else {
+                        spaceCount++;
+                    }
+                } else {
+                    break;
+                }
+            }
+            return newIndent;
+        } catch (IOException e) {
+            // ignored
+        } return indent;
     }
 
 
