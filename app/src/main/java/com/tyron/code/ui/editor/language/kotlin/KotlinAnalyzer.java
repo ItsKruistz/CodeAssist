@@ -1,58 +1,84 @@
 package com.tyron.code.ui.editor.language.kotlin;
 
-import android.graphics.Color;
-import android.util.Log;
-
-import androidx.preference.PreferenceManager;
-
-import com.tyron.builder.model.DiagnosticWrapper;
 import com.tyron.builder.project.Project;
 import com.tyron.builder.project.api.AndroidModule;
 import com.tyron.builder.project.api.Module;
-import com.tyron.code.BuildConfig;
+import com.tyron.code.ApplicationLoader;
+import com.tyron.code.ui.editor.language.AbstractCodeAnalyzer;
 import com.tyron.code.ui.editor.language.HighlightUtil;
 import com.tyron.code.ui.project.ProjectManager;
 import com.tyron.common.SharedPreferenceKeys;
+import com.tyron.completion.progress.ProgressManager;
+import com.tyron.editor.Editor;
 import com.tyron.kotlin_completion.CompletionEngine;
 
 import org.antlr.v4.runtime.CharStream;
-import org.antlr.v4.runtime.CharStreams;
-import org.antlr.v4.runtime.CodePointCharStream;
+import org.antlr.v4.runtime.Lexer;
 import org.antlr.v4.runtime.Token;
 import org.antlr.v4.runtime.TokenSource;
 
 import java.lang.ref.WeakReference;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Stack;
 
-import io.github.rosemoe.sora.data.BlockLine;
-import io.github.rosemoe.sora.data.Span;
-import io.github.rosemoe.sora.interfaces.CodeAnalyzer;
-import io.github.rosemoe.sora.text.TextAnalyzeResult;
-import io.github.rosemoe.sora.text.TextAnalyzer;
-import io.github.rosemoe.sora.widget.CodeEditor;
-import io.github.rosemoe.sora.widget.EditorColorScheme;
+import io.github.rosemoe.sora.lang.styling.MappedSpans;
+import io.github.rosemoe.sora.lang.styling.Styles;
+import io.github.rosemoe.sora.widget.schemes.EditorColorScheme;
 
-public class KotlinAnalyzer implements CodeAnalyzer {
+public class KotlinAnalyzer extends AbstractCodeAnalyzer<Object> {
 
-    private final WeakReference<CodeEditor> mEditorReference;
-    private final List<DiagnosticWrapper> mDiagnostics;
+    private final WeakReference<Editor> mEditorReference;
 
-    public KotlinAnalyzer(CodeEditor editor) {
+    public KotlinAnalyzer(Editor editor) {
         mEditorReference = new WeakReference<>(editor);
-        mDiagnostics = new ArrayList<>();
     }
 
     @Override
-    public void setDiagnostics(List<DiagnosticWrapper> diagnostics) {
-        mDiagnostics.clear();
-        mDiagnostics.addAll(diagnostics);
+    public void setup() {
+        putColor(EditorColorScheme.KEYWORD, KotlinLexer.OVERRIDE,
+                KotlinLexer.PUBLIC, KotlinLexer.PRIVATE, KotlinLexer.PROTECTED,
+                KotlinLexer.FUN, KotlinLexer.PACKAGE, KotlinLexer.IMPORT,
+                KotlinLexer.CLASS, KotlinLexer.INTERFACE, KotlinLexer.VAL,
+                KotlinLexer.VAR, KotlinLexer.ABSTRACT, KotlinLexer.BREAK,
+                KotlinLexer.TRY, KotlinLexer.THROW, KotlinLexer.FOR,
+                KotlinLexer.WHILE, KotlinLexer.IN, KotlinLexer.INTERNAL,
+                KotlinLexer.AS, KotlinLexer.CONTINUE, KotlinLexer.RETURN,
+                KotlinLexer.GET, KotlinLexer.SET, KotlinLexer.SETTER,
+                KotlinLexer.VARARG, KotlinLexer.FINALLY, KotlinLexer.SEMICOLON,
+                KotlinLexer.IF, KotlinLexer.ELSE, KotlinLexer.INIT,
+                KotlinLexer.LATEINIT, KotlinLexer.OBJECT, KotlinLexer.REIFIED,
+                KotlinLexer.BY, KotlinLexer.CATCH, KotlinLexer.SEALED,
+                KotlinLexer.SUSPEND, KotlinLexer.IS, KotlinLexer.OPEN,
+                KotlinLexer.DATA, KotlinLexer.CONSTRUCTOR, KotlinLexer.WHEN,
+                KotlinLexer.WHERE, KotlinLexer.INFIX);
+        putColor(EditorColorScheme.LITERAL, KotlinLexer.BinLiteral,
+                KotlinLexer.BooleanLiteral, KotlinLexer.LongLiteral,
+                KotlinLexer.IntegerLiteral, KotlinLexer.FloatLiteral,
+                KotlinLexer.CharacterLiteral, KotlinLexer.DoubleLiteral,
+                KotlinLexer.NullLiteral, KotlinLexer.RealLiteral,
+                KotlinLexer.LineString, KotlinLexer.MultiLineString,
+                KotlinLexer.StringExpression, KotlinLexer.MultiLineStringQuote,
+                KotlinLexer.LineStrText, KotlinLexer.SINGLE_QUOTE, KotlinLexer.QUOTE_OPEN,
+                KotlinLexer.QUOTE_CLOSE, KotlinLexer.HexLiteral, KotlinLexer.MultiLineStrText,
+                KotlinLexer.TRIPLE_QUOTE_CLOSE, KotlinLexer.TRIPLE_QUOTE_OPEN);
+        putColor(EditorColorScheme.COMMENT, KotlinLexer.DelimitedComment,
+                KotlinLexer.StrExpr_Comment, KotlinLexer.LineComment,
+                KotlinLexer.Inside_Comment);
+        putColor(EditorColorScheme.ANNOTATION, KotlinLexer.AT,
+                KotlinLexer.LabelReference);
+        putColor(EditorColorScheme.OPERATOR, KotlinLexer.OPERATOR,
+                KotlinLexer.ADD, KotlinLexer.SUB,
+                KotlinLexer.MULT, KotlinLexer.DIV,
+                KotlinLexer.ELVIS);
+        // todo add block lines
+    }
+
+    @Override
+    public Lexer getLexer(CharStream input) {
+        return new KotlinLexer(input);
     }
 
     @Override
     public void analyzeInBackground(CharSequence content) {
-        CodeEditor editor = mEditorReference.get();
+        Editor editor = mEditorReference.get();
         if (editor == null) {
             return;
         }
@@ -60,11 +86,18 @@ public class KotlinAnalyzer implements CodeAnalyzer {
         if (currentProject != null) {
             Module module = currentProject.getModule(editor.getCurrentFile());
             if (module instanceof AndroidModule) {
-                if (PreferenceManager.getDefaultSharedPreferences(editor.getContext())
+                if (ApplicationLoader.getDefaultPreferences()
                         .getBoolean(SharedPreferenceKeys.KOTLIN_HIGHLIGHTING, true)) {
-                    editor.postDelayed(() -> {
+                    ProgressManager.getInstance().runLater(() -> {
+
+                        editor.setAnalyzing(true);
+
                         CompletionEngine.getInstance((AndroidModule) module)
-                                .doLint(editor.getCurrentFile(), content.toString(), editor::setDiagnostics);
+                                .doLint(editor.getCurrentFile(), content.toString(), diagnostics -> {
+                                    editor.setDiagnostics(diagnostics);
+
+                                    ProgressManager.getInstance().runLater(() -> editor.setAnalyzing(false), 300);
+                                });
                     }, 1500);
                 }
             }
@@ -72,168 +105,12 @@ public class KotlinAnalyzer implements CodeAnalyzer {
     }
 
     @Override
-    public void analyze(CharSequence content, TextAnalyzeResult colors, TextAnalyzer.AnalyzeThread.Delegate delegate) {
-        CodeEditor editor = mEditorReference.get();
-        if (editor == null) {
-            return;
-        }
-        try {
-            CodePointCharStream stream = CharStreams.fromString(String.valueOf(content));
-            KotlinLexer lexer = new KotlinLexer(stream);
+    protected void afterAnalyze(CharSequence content, Styles styles, MappedSpans.Builder colors) {
+        super.afterAnalyze(content, styles, colors);
 
-            Stack<BlockLine> stack = new Stack<>();
-            int maxSwitch = 1, currSwitch = 0;
-            int lastLine = 0;
-            int line, column;
-            Token previous = UnknownToken.INSTANCE;
-            Token token = null;
-
-            while (delegate.shouldAnalyze()) {
-                token = lexer.nextToken();
-                if (token == null) {
-                    break;
-                }
-
-                if (token.getType() == KotlinLexer.EOF) {
-                    lastLine = token.getLine() - 1;
-                    break;
-                }
-                line = token.getLine() - 1;
-                column = token.getCharPositionInLine();
-                lastLine = line;
-
-                switch (token.getType()) {
-                    case KotlinLexer.ADD:
-                    case KotlinLexer.SUB:
-                    case KotlinLexer.MULT:
-                    case KotlinLexer.DIV:
-                    case KotlinLexer.ELVIS:
-                        colors.addIfNeeded(line, column, EditorColorScheme.OPERATOR);
-                        break;
-                    case KotlinLexer.INTERNAL:
-                    case KotlinLexer.IF:
-                    case KotlinLexer.ELSE:
-                    case KotlinLexer.IS:
-                    case KotlinLexer.FUN:
-                    case KotlinLexer.SUSPEND:
-                    case KotlinLexer.OVERRIDE:
-                    case KotlinLexer.CLASS:
-                    case KotlinLexer.OPEN:
-                    case KotlinLexer.PRIVATE:
-                    case KotlinLexer.PUBLIC:
-                    case KotlinLexer.PROTECTED:
-                    case KotlinLexer.DATA:
-                    case KotlinLexer.CONSTRUCTOR:
-                    case KotlinLexer.VAL:
-                    case KotlinLexer.VAR:
-                    case KotlinLexer.VARARG:
-                    case KotlinLexer.SEALED:
-                    case KotlinLexer.PACKAGE:
-                    case KotlinLexer.IMPORT:
-                    case KotlinLexer.RETURN:
-                    case KotlinLexer.INNER:
-                    case KotlinLexer.REIFIED:
-                    case KotlinLexer.BY:
-                    case KotlinLexer.ABSTRACT:
-                    case KotlinLexer.CATCH:
-                    case KotlinLexer.THROW:
-                    case KotlinLexer.CONTINUE:
-                    case KotlinLexer.FOR:
-                    case KotlinLexer.WHEN:
-                    case KotlinLexer.WHILE:
-                    case KotlinLexer.FINAL:
-                    case KotlinLexer.LATEINIT:
-                    case KotlinLexer.IN:
-                    case KotlinLexer.INFIX:
-                    case KotlinLexer.AS:
-                    case KotlinLexer.INLINE:
-                    case KotlinLexer.SUPER:
-                    case KotlinLexer.GET:
-                    case KotlinLexer.THIS:
-                    case KotlinLexer.INIT:
-                    case KotlinLexer.OBJECT:
-                    case KotlinLexer.INTERFACE:
-                        colors.addIfNeeded(line, column, EditorColorScheme.KEYWORD);
-                        break;
-                    case KotlinLexer.Identifier:
-                        colors.addIfNeeded(line, column, EditorColorScheme.IDENTIFIER_NAME);
-                        break;
-                    case KotlinLexer.QUOTE_CLOSE:
-                    case KotlinLexer.QUOTE_OPEN:
-                    case KotlinLexer.LineStrText:
-                    case KotlinLexer.LineStrExprStart:
-                    case KotlinLexer.MultiLineStrText:
-                    case KotlinLexer.MultiLineString:
-                    case KotlinLexer.LineString:
-                    case KotlinLexer.StringExpression:
-                    case KotlinLexer.IntegerLiteral:
-                    case KotlinLexer.CharacterLiteral:
-                    case KotlinLexer.BinLiteral:
-                    case KotlinLexer.RealLiteral:
-                    case KotlinLexer.BooleanLiteral:
-                    case KotlinLexer.DoubleLiteral:
-                    case KotlinLexer.FloatLiteral:
-                    case KotlinLexer.LongLiteral:
-                    case KotlinLexer.HexLiteral:
-                        Span span = Span.obtain(column, EditorColorScheme.LITERAL);
-                        if (token.getType() == KotlinLexer.HexLiteral) {
-                            try {
-                                span.setUnderlineColor(Integer.parseInt(token.getText(), 16));
-                            } catch (Exception e) {
-                                span.setUnderlineColor(Color.TRANSPARENT);
-                            }
-                        }
-                        colors.addIfNeeded(line, span);
-                        break;
-                    case KotlinLexer.AT:
-                    case KotlinLexer.LabelReference:
-                        colors.addIfNeeded(line, column, EditorColorScheme.ANNOTATION);
-                        break;
-                    case KotlinLexer.LCURL:
-                        if (stack.isEmpty()) {
-                            if (currSwitch > maxSwitch) {
-                                maxSwitch = currSwitch;
-                            }
-                            currSwitch = 0;
-                        }
-                        currSwitch++;
-                        BlockLine block = colors.obtainNewBlock();
-                        block.startLine = line;
-                        block.startColumn = column;
-                        stack.push(block);
-                        break;
-                    case KotlinLexer.RCURL:
-                        if (!stack.isEmpty()) {
-                            BlockLine b = stack.pop();
-                            b.endLine = line;
-                            b.endColumn = column;
-                            if (b.startLine != b.endLine) {
-                                colors.addBlockLine(b);
-                            }
-                        }
-                        break;
-                    default:
-                        colors.addIfNeeded(line, column, EditorColorScheme.TEXT_NORMAL);
-                        break;
-                }
-
-                if (token.getType() != KotlinLexer.WS && token.getType() != KotlinLexer.NL) {
-                    previous = token;
-                }
-            }
-            colors.determine(lastLine);
-
-            if (stack.isEmpty()) {
-                if (currSwitch > maxSwitch) {
-                    maxSwitch = currSwitch;
-                }
-            }
-            colors.setSuppressSwitch(maxSwitch + 10);
-            HighlightUtil.markDiagnostics(editor, mDiagnostics, colors);
-        } catch (Throwable e) {
-            if (BuildConfig.DEBUG) {
-                Log.e("KotlinAnalyzer", "Failed to analyze", e);
-            }
+        Editor editor = mEditorReference.get();
+        if (editor != null) {
+            HighlightUtil.markDiagnostics(editor, mDiagnostics, styles);
         }
     }
 

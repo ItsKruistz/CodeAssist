@@ -15,7 +15,7 @@ import com.tyron.code.R;
 import com.tyron.fileeditor.api.FileEditor;
 import com.tyron.code.ui.editor.impl.xml.LayoutEditor;
 import com.tyron.code.ui.editor.impl.xml.LayoutTextEditorFragment;
-import com.tyron.code.util.AndroidUtilities;
+import com.tyron.common.util.AndroidUtilities;
 
 public class PreviewLayoutAction extends AnAction {
 
@@ -41,9 +41,9 @@ public class PreviewLayoutAction extends AnAction {
 
     @Override
     public void actionPerformed(@NonNull AnActionEvent e) {
-        FileEditor fileEditor = e.getData(CommonDataKeys.FILE_EDITOR_KEY);
+        FileEditor fileEditor = e.getRequiredData(CommonDataKeys.FILE_EDITOR_KEY);
         Fragment fragment = fileEditor.getFragment();
-        if (fragment == null || fragment.isDetached()) {
+        if (fragment == null || fragment.isDetached() || fragment.getActivity() == null) {
             return;
         }
         FragmentActivity activity = fragment.requireActivity();

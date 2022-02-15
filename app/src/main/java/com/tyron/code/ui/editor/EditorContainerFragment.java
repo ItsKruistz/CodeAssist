@@ -9,6 +9,9 @@ import android.widget.PopupMenu;
 import androidx.activity.OnBackPressedCallback;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowInsetsCompat;
 import androidx.fragment.app.Fragment;
 import androidx.lifecycle.ViewModelProvider;
 import androidx.viewpager2.widget.ViewPager2;
@@ -21,19 +24,27 @@ import com.tyron.actions.ActionPlaces;
 import com.tyron.actions.CommonDataKeys;
 import com.tyron.actions.DataContext;
 import com.tyron.actions.util.DataContextUtils;
+import com.tyron.builder.project.Project;
+import com.tyron.builder.project.api.FileManager;
+import com.tyron.builder.project.api.Module;
+import com.tyron.builder.project.listener.FileListener;
 import com.tyron.code.R;
 import com.tyron.code.ui.editor.adapter.PageAdapter;
+import com.tyron.code.ui.editor.impl.FileEditorManagerImpl;
 import com.tyron.code.ui.editor.impl.text.rosemoe.CodeEditorFragment;
 import com.tyron.code.ui.editor.impl.xml.LayoutTextEditorFragment;
 import com.tyron.code.ui.main.MainFragment;
 import com.tyron.code.ui.main.MainViewModel;
 import com.tyron.code.ui.project.ProjectManager;
+import com.tyron.common.util.AndroidUtilities;
+import com.tyron.fileeditor.api.FileEditor;
 import com.tyron.fileeditor.api.FileEditorManager;
 
 import java.io.File;
+import java.util.List;
 import java.util.Objects;
 
-public class EditorContainerFragment extends Fragment {
+public class EditorContainerFragment extends Fragment implements FileListener, ProjectManager.OnProjectOpenListener {
 
     public static final String SAVE_ALL_KEY = "saveAllEditors";
     public static final String PREVIEW_KEY = "previewEditor";
@@ -78,16 +89,13 @@ public class EditorContainerFragment extends Fragment {
                              @Nullable Bundle savedInstanceState) {
         View root = inflater.inflate(R.layout.editor_container_fragment, container, false);
 
+        ((FileEditorManagerImpl) FileEditorManagerImpl.getInstance())
+                .attach(mMainViewModel, getChildFragmentManager());
+
         mAdapter = new PageAdapter(getChildFragmentManager(), getLifecycle());
         mPager = root.findViewById(R.id.viewpager);
         mPager.setAdapter(mAdapter);
         mPager.setUserInputEnabled(false);
-        mPager.registerOnPageChangeCallback(new ViewPager2.OnPageChangeCallback() {
-            @Override
-            public void onPageSelected(int position) {
-                mMainViewModel.updateCurrentPosition(position);
-            }
-        });
 
         mTabLayout = root.findViewById(R.id.tablayout);
         mTabLayout.addOnTabSelectedListener(new TabLayout.OnTabSelectedListener() {
@@ -96,7 +104,7 @@ public class EditorContainerFragment extends Fragment {
                 Fragment fragment = getChildFragmentManager()
                         .findFragmentByTag("f" + mAdapter.getItemId(p1.getPosition()));
                 if (fragment instanceof CodeEditorFragment) {
-                    ((CodeEditorFragment) fragment).save();
+                    ((CodeEditorFragment) fragment).save(true);
                 }
             }
 
@@ -114,42 +122,19 @@ public class EditorContainerFragment extends Fragment {
                         popup.getMenu(), ActionPlaces.EDITOR_TAB,
                         true,
                         false);
-//                popup.getMenu().add(0, 0, 1, "Close");
-//                popup.getMenu().add(0, 1, 2, "Close others");
-//                popup.getMenu().add(0, 2, 3, "Close all");
-//                popup.setOnMenuItemClickListener(item -> {
-//                    switch (item.getItemId()) {
-//                        case 0:
-//                            mMainViewModel.removeFile(mMainViewModel.getCurrentFileEditor().getFile());
-//                            break;
-//                        case 1:
-//                            mMainViewModel.removeOthers(mMainViewModel.getCurrentFileEditor().getFile());
-//                            break;
-//                        case 2:
-//                            mMainViewModel.clear();
-//                    }
-//                    return true;
-//                });
                 popup.show();
             }
 
             @Override
             public void onTabSelected(TabLayout.Tab p1) {
-                Fragment fragment = getChildFragmentManager()
-                        .findFragmentByTag("f" + mAdapter.getItemId(p1.getPosition()));
-                if (fragment instanceof CodeEditorFragment) {
-                    ((CodeEditorFragment) fragment).analyze();
-                }
-
+                updateTab(p1, p1.getPosition());
+                mMainViewModel.setCurrentPosition(p1.getPosition(), false);
                 getParentFragmentManager()
                         .setFragmentResult(MainFragment.REFRESH_TOOLBAR_KEY, Bundle.EMPTY);
             }
         });
-        new TabLayoutMediator(mTabLayout, mPager, true, false, (tab, pos) -> {
-            File current = Objects.requireNonNull(mMainViewModel.getFiles().getValue()).get(pos)
-                    .getFile();
-            tab.setText(current != null ? current.getName() : "Unknown");
-        }).attach();
+
+        new TabLayoutMediator(mTabLayout, mPager, true, true, this::updateTab).attach();
 
         mBehavior = BottomSheetBehavior.from(root.findViewById(R.id.persistent_sheet));
         mBehavior.addBottomSheetCallback(new BottomSheetBehavior.BottomSheetCallback() {
@@ -169,11 +154,34 @@ public class EditorContainerFragment extends Fragment {
             }
         });
         mBehavior.setHalfExpandedRatio(0.3f);
+        mBehavior.setFitToContents(false);
+
+        ProjectManager.getInstance().addOnProjectOpenListener(this);
 
         if (savedInstanceState != null) {
             restoreViewState(savedInstanceState);
         }
         return root;
+    }
+
+    private void updateTab(TabLayout.Tab tab, int pos) {
+        FileEditor currentEditor = Objects.requireNonNull(mMainViewModel.getFiles().getValue()).get(pos);
+        File current = currentEditor.getFile();
+
+        String text = current != null ? current.getName() : "Unknown";
+        if (currentEditor.isModified()) {
+            text = "*" + text;
+        }
+
+        tab.setText(text);
+    }
+
+    @Override
+    public void onProjectOpen(Project project) {
+        for (Module module : project.getModules()) {
+            FileManager fileManager = module.getFileManager();
+            fileManager.addSnapshotListener(this);
+        }
     }
 
     @Override
@@ -184,6 +192,10 @@ public class EditorContainerFragment extends Fragment {
         });
         mMainViewModel.getCurrentPosition().observe(getViewLifecycleOwner(), pos -> {
             mPager.setCurrentItem(pos, false);
+            TabLayout.Tab tab = mTabLayout.getTabAt(pos);
+            if (tab != null) {
+                updateTab(tab, pos);
+            }
             if (mBehavior.getState() == BottomSheetBehavior.STATE_EXPANDED) {
                 mMainViewModel.setBottomSheetState(BottomSheetBehavior.STATE_COLLAPSED);
             }
@@ -211,6 +223,20 @@ public class EditorContainerFragment extends Fragment {
         getChildFragmentManager().setFragmentResult(BottomEditorFragment.OFFSET_KEY, floatOffset);
     }
 
+    @Override
+    public void onDestroyView() {
+        super.onDestroyView();
+
+        ProjectManager projectManager = ProjectManager.getInstance();
+        Project currentProject = projectManager.getCurrentProject();
+        if (currentProject != null) {
+            for (Module module : currentProject.getModules()) {
+                FileManager fileManager = module.getFileManager();
+                fileManager.removeSnapshotListener(this);
+            }
+        }
+    }
+
     private void formatCurrent() {
         String tag = "f" + mAdapter.getItemId(mPager.getCurrentItem());
         Fragment fragment = getChildFragmentManager().findFragmentByTag(tag);
@@ -232,8 +258,38 @@ public class EditorContainerFragment extends Fragment {
             String tag = "f" + mAdapter.getItemId(i);
             Fragment fragment = getChildFragmentManager().findFragmentByTag(tag);
             if (fragment instanceof Savable) {
-                ((Savable) fragment).save();
+                ((Savable) fragment).save(true);
             }
         }
+    }
+
+    @Override
+    public void onSnapshotChanged(File file, CharSequence contents) {
+        if (mTabLayout == null) {
+            return;
+        }
+        List<FileEditor> editors = mMainViewModel.getFiles().getValue();
+        if (editors == null) {
+            return;
+        }
+
+        int found = -1;
+        for (int i = 0; i < editors.size(); i++) {
+            FileEditor editor = editors.get(i);
+            if (file.equals(editor.getFile())) {
+                found = i;
+                break;
+            }
+        }
+
+        if (found == -1) {
+            return;
+        }
+
+        TabLayout.Tab tab = mTabLayout.getTabAt(found);
+        if (tab == null) {
+            return;
+        }
+        updateTab(tab, found);
     }
 }

@@ -9,8 +9,8 @@ android {
         applicationId "com.tyron.code"
         minSdkVersion 26
         targetSdkVersion 31
-        versionCode 7
-        versionName "0.2.3 ALPHA"
+        versionCode 14
+        versionName "0.2.6.1 ALPHA"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -35,18 +35,18 @@ configurations.implementation {
 }
 
 dependencies {
-    implementation project(path: ':build-logic')
+    implementation project(path: ':build-tools:build-logic')
+    implementation project(path: ':build-tools:jaxp:jaxp-internal')
+    implementation project(path: ':build-tools:jaxp:xml')
     implementation project(path: ':common')
-    implementation project(path: ':lint')
+    implementation project(path: ':build-tools:lint')
     implementation project(path: ':layout-preview')
     implementation project(path: ':kotlin-completion')
-    implementation project(path: ':jaxp:jaxp-internal')
-    implementation project(path: ':jaxp:xml')
-
-    implementation 'io.github.medyo:android-about-page:2.0.0'
     
     implementation 'androidx.swiperefreshlayout:swiperefreshlayout:1.1.0'
     implementation project(path: ':dependency-resolver')
+
+    implementation project(path: ':treeview')
 
     // completions
     implementation project(path: ':code-editor')
@@ -58,6 +58,13 @@ dependencies {
     implementation project(path: ':actions-api')
     implementation project(path: ':editor-api')
     implementation project(path: ':fileeditor-api')
+
+    // formatters
+    implementation project(path: ':google-java-format')
+
+    // about
+    implementation 'io.github.medyo:android-about-page:2.0.0'
+    implementation 'com.github.daniel-stoneuk:material-about-library:3.1.2'
 
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:1.1.5")
 
@@ -85,7 +92,6 @@ dependencies {
 
 
     implementation files (
-        'libs/google-java-format-1.7.jar',
         'libs/language-base-0.5.0.jar',
         'libs/language-java-0.5.0.jar'
     )

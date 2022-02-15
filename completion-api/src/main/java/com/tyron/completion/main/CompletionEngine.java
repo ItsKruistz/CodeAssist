@@ -1,5 +1,7 @@
 package com.tyron.completion.main;
 
+import android.util.Log;
+
 import com.tyron.builder.project.Project;
 import com.tyron.builder.project.api.Module;
 import com.tyron.completion.CompletionParameters;
@@ -9,6 +11,8 @@ import com.tyron.completion.progress.ProcessCanceledException;
 import com.tyron.completion.progress.ProgressManager;
 
 import java.io.File;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -58,9 +62,6 @@ public class CompletionEngine {
                                    int line,
                                    int column,
                                    long index) {
-        if (ProgressManager.getInstance().isRunning()) {
-            ProgressManager.getInstance().setCanceled(true);
-        }
         CompletionList list = new CompletionList();
         list.items = new ArrayList<>();
 
@@ -75,19 +76,14 @@ public class CompletionEngine {
                 .setIndex(index)
                 .build();
 
+        Instant now = Instant.now();
         List<CompletionProvider> providers = getCompletionProviders(file);
         for (CompletionProvider provider : providers) {
-            try {
-                ProgressManager.getInstance().setRunning(true);
-                ProgressManager.getInstance().setCanceled(false);
-                CompletionList complete = provider.complete(parameters);
-                list.items.addAll(complete.items);
-            } catch(ProcessCanceledException e) {
-                return list;
-            } {
-                ProgressManager.getInstance().setRunning(false);
-            }
+            CompletionList complete = provider.complete(parameters);
+            list.items.addAll(complete.items);
         }
+
+        Log.d("CompletionEngine", "Completions took " + Duration.between(now, Instant.now()).toMillis() + " ms");
         return list;
     }
 

@@ -27,6 +27,7 @@ import com.tyron.completion.xml.XmlRepository;
 import com.tyron.completion.xml.model.AttributeInfo;
 import com.tyron.completion.xml.model.DeclareStyleable;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -162,10 +163,10 @@ public class AttributeEditorDialogFragment extends BottomSheetDialogFragment {
         }
         if (xmlRepository != null) {
             List<String> values = new ArrayList<>();
-            Set<DeclareStyleable> styles = new HashSet<>();
             Map<String, DeclareStyleable> declareStyleables =
                     xmlRepository.getDeclareStyleables();
-            styles.addAll(StyleUtils.getStyles(declareStyleables, mTag, mParentTag));
+            Set<DeclareStyleable> styles = new HashSet<>(StyleUtils.getStyles(declareStyleables,
+                    mTag, mParentTag));
 
             for (DeclareStyleable style : styles) {
                 for (AttributeInfo attributeInfo : style.getAttributeInfos()) {
@@ -220,7 +221,11 @@ public class AttributeEditorDialogFragment extends BottomSheetDialogFragment {
 
         XmlIndexProvider index = CompilerService.getInstance().getIndex(XmlIndexProvider.KEY);
         XmlRepository xmlRepository = index.get(currentProject, mainModule);
-        xmlRepository.initialize((AndroidModule) mainModule);
+        try {
+            xmlRepository.initialize((AndroidModule) mainModule);
+        } catch (IOException e) {
+            // ignored
+        }
         return xmlRepository;
     }
 }

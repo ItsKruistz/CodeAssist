@@ -7,9 +7,7 @@ import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
-import android.view.ContextMenu;
 import android.view.LayoutInflater;
-import android.view.MenuItem;
 import android.view.View;
 import android.view.ViewGroup;
 
@@ -17,8 +15,8 @@ import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
-import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
+import androidx.core.view.ViewKt;
 import androidx.core.widget.NestedScrollView;
 import androidx.fragment.app.Fragment;
 import androidx.preference.PreferenceManager;
@@ -33,9 +31,6 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.google.android.material.floatingactionbutton.ExtendedFloatingActionButton;
 import com.google.android.material.transition.MaterialFade;
 import com.google.android.material.transition.MaterialSharedAxis;
-import com.google.common.util.concurrent.FutureCallback;
-import com.google.common.util.concurrent.Futures;
-import com.google.common.util.concurrent.ListenableFutureTask;
 import com.tyron.builder.project.Project;
 import com.tyron.code.R;
 import com.tyron.code.ui.file.FilePickerDialogFixed;
@@ -43,7 +38,8 @@ import com.tyron.code.ui.main.MainFragment;
 import com.tyron.code.ui.project.adapter.ProjectManagerAdapter;
 import com.tyron.code.ui.settings.SettingsActivity;
 import com.tyron.code.ui.wizard.WizardFragment;
-import com.tyron.code.util.AndroidUtilities;
+import com.tyron.code.util.UiUtilsKt;
+import com.tyron.common.util.AndroidUtilities;
 import com.tyron.common.SharedPreferenceKeys;
 
 import org.apache.commons.io.FileUtils;
@@ -101,10 +97,6 @@ public class ProjectManagerFragment extends Fragment {
 
     @Override
     public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
-
-        NestedScrollView scrollView = view.findViewById(R.id.scrolling_view);
-        scrollView.setNestedScrollingEnabled(false);
-
         MaterialToolbar toolbar = view.findViewById(R.id.toolbar);
         toolbar.setTitle(R.string.app_name);
 
@@ -143,6 +135,8 @@ public class ProjectManagerFragment extends Fragment {
                     .addToBackStack(null)
                     .commit();
         });
+        UiUtilsKt.addSystemWindowInsetToMargin(mCreateProjectFab, false, false, false, true);
+
         mAdapter = new ProjectManagerAdapter();
         mAdapter.setOnProjectSelectedListener(this::openProject);
         mAdapter.setOnProjectLongClickListener(this::inflateProjectMenus);

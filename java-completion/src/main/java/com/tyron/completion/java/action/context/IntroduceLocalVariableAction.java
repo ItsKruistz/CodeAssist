@@ -12,6 +12,7 @@ import com.tyron.completion.java.compiler.CompilerContainer;
 import com.tyron.completion.java.compiler.JavaCompilerService;
 import com.tyron.completion.java.R;
 import com.tyron.completion.java.action.CommonJavaContextKeys;
+import com.tyron.completion.java.util.TreeUtil;
 import com.tyron.completion.util.RewriteUtil;
 import com.tyron.completion.java.rewrite.IntroduceLocalVariable;
 import com.tyron.completion.java.rewrite.JavaRewrite;
@@ -21,7 +22,12 @@ import com.tyron.editor.Editor;
 import org.openjdk.javax.lang.model.element.Element;
 import org.openjdk.javax.lang.model.element.ExecutableElement;
 import org.openjdk.javax.lang.model.type.ErrorType;
+import org.openjdk.javax.lang.model.type.ExecutableType;
+import org.openjdk.javax.lang.model.type.TypeKind;
 import org.openjdk.javax.lang.model.type.TypeMirror;
+import org.openjdk.source.tree.MethodInvocationTree;
+import org.openjdk.source.tree.NewClassTree;
+import org.openjdk.source.tree.Tree;
 import org.openjdk.source.util.SourcePositions;
 import org.openjdk.source.util.TreePath;
 import org.openjdk.source.util.Trees;
@@ -61,7 +67,7 @@ public class IntroduceLocalVariableAction extends AnAction {
             return;
         }
 
-        if (!ActionUtil.canIntroduceLocalVariable(currentPath)) {
+        if (ActionUtil.canIntroduceLocalVariable(currentPath) == null) {
             return;
         }
 
@@ -71,15 +77,16 @@ public class IntroduceLocalVariableAction extends AnAction {
 
     @Override
     public void actionPerformed(@NonNull AnActionEvent e) {
-        Editor editor = e.getData(CommonDataKeys.EDITOR);
-        TreePath currentPath = e.getData(CommonJavaContextKeys.CURRENT_PATH);
-        File file = e.getData(CommonDataKeys.FILE);
+        Editor editor = e.getRequiredData(CommonDataKeys.EDITOR);
+        TreePath currentPath = e.getRequiredData(CommonJavaContextKeys.CURRENT_PATH);
+        File file = e.getRequiredData(CommonDataKeys.FILE);
         JavaCompilerService compiler = e.getRequiredData(CommonJavaContextKeys.COMPILER);
         CompilerContainer cachedContainer = compiler.getCachedContainer();
 
         JavaRewrite rewrite = cachedContainer.get(task -> {
             if (task != null) {
-                return performInternal(task, currentPath, file);
+                TreePath path = ActionUtil.canIntroduceLocalVariable(currentPath);
+                return performInternal(task, path, file);
             }
             return null;
         });
@@ -92,6 +99,11 @@ public class IntroduceLocalVariableAction extends AnAction {
     private JavaRewrite performInternal(CompileTask task, TreePath path, File file) {
         Trees trees = Trees.instance(task.task);
         Element element = trees.getElement(path);
+
+        if (element == null) {
+            return null;
+        }
+
         TypeMirror typeMirror = trees.getTypeMirror(path);
 
         if (typeMirror instanceof ErrorType) {
@@ -100,14 +112,28 @@ public class IntroduceLocalVariableAction extends AnAction {
                     .getTypeElement("java.lang.Object")
                     .asType();
         }
+
         if (typeMirror != null) {
+            if (typeMirror.getKind() == TypeKind.DECLARED) {
+                // use the new class as starting point
+                TreePath parentOfType = TreeUtil.findParentOfType(path, NewClassTree.class);
+                if (parentOfType != null) {
+                    path = parentOfType;
+                }
+            }
+            if (typeMirror.getKind() == TypeKind.EXECUTABLE) {
+                // use the return type of the method
+                typeMirror = ((ExecutableType) typeMirror).getReturnType();
+            }
             return rewrite(typeMirror, trees, path, file, element.getSimpleName().toString());
         }
 
         if (element instanceof ExecutableElement) {
             TypeMirror returnType = ActionUtil.getReturnType(task.task, path,
                     (ExecutableElement) element);
-            return rewrite(returnType, trees, path, file, element.getSimpleName().toString());
+            if (returnType != null) {
+                return rewrite(returnType, trees, path, file, element.getSimpleName().toString());
+            }
         }
         return null;
     }

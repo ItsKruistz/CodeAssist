@@ -1,11 +1,17 @@
 package com.tyron.actions.impl;
 
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.os.Build;
+import android.util.Log;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.SubMenu;
+import android.view.View;
 
 import androidx.annotation.NonNull;
 
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.tyron.actions.ActionGroup;
 import com.tyron.actions.ActionManager;
 import com.tyron.actions.AnAction;
@@ -15,6 +21,7 @@ import com.tyron.actions.DataContext;
 import com.tyron.actions.Presentation;
 
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.concurrent.ExecutorService;
@@ -22,31 +29,33 @@ import java.util.concurrent.Executors;
 
 public class ActionManagerImpl extends ActionManager {
 
-
-
-    private final Map<String, AnAction> mIdToAction = new TreeMap<>();
+    private final Map<String, AnAction> mIdToAction = new LinkedHashMap<>();
     private final Map<Object, String> mActionToId = new HashMap<>();
 
-    private final ExecutorService mExecutor = Executors.newSingleThreadExecutor();
-
     @Override
-    public void fillMenu(DataContext context, Menu menu, String place, boolean isContext, boolean isToolbar) {
+    public void fillMenu(DataContext context,
+                         Menu menu,
+                         String place,
+                         boolean isContext,
+                         boolean isToolbar) {
         // Inject values
         context.putData(CommonDataKeys.CONTEXT, context);
+        if (Build.VERSION_CODES.P <= Build.VERSION.SDK_INT) {
+            menu.setGroupDividerEnabled(true);
+        }
 
         for (AnAction value : mIdToAction.values()) {
 
-            AnActionEvent event = new AnActionEvent(context,
-                    place,
-                    value.getTemplatePresentation(),
-                    isContext,
-                    isToolbar);
+            AnActionEvent event =
+                    new AnActionEvent(context, place, value.getTemplatePresentation(), isContext,
+                                      isToolbar);
 
             event.setPresentation(value.getTemplatePresentation());
 
             value.update(event);
 
-            if (event.getPresentation().isVisible()) {
+            if (event.getPresentation()
+                    .isVisible()) {
                 fillMenu(menu, value, event);
             }
         }
@@ -58,10 +67,14 @@ public class ActionManagerImpl extends ActionManager {
 
         MenuItem menuItem;
         if (isGroup(action)) {
+            ActionGroup actionGroup = (ActionGroup) action;
+            if (!actionGroup.isPopup()) {
+                fillMenu(View.generateViewId(), menu, actionGroup, event);
+                return;
+            }
             SubMenu subMenu = menu.addSubMenu(presentation.getText());
             menuItem = subMenu.getItem();
 
-            ActionGroup actionGroup = (ActionGroup) action;
             AnAction[] children = actionGroup.getChildren(event);
             if (children != null) {
                 for (AnAction child : children) {
@@ -69,8 +82,11 @@ public class ActionManagerImpl extends ActionManager {
 
                     child.update(event);
 
-                    if (event.getPresentation().isVisible()) {
-                        fillSubMenu(subMenu, child, event);
+                    if (event.getPresentation()
+                            .isVisible()) {
+                        if (actionGroup.isPopup()) {
+                            fillSubMenu(subMenu, child, event);
+                        }
                     }
                 }
             }
@@ -86,10 +102,29 @@ public class ActionManagerImpl extends ActionManager {
             menuItem.setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER);
         }
         menuItem.setIcon(presentation.getIcon());
-        menuItem.setOnMenuItemClickListener(item -> {
-            action.actionPerformed(event);
-            return true;
-        });
+        menuItem.setOnMenuItemClickListener(item -> performAction(action, event));
+    }
+
+    private void fillMenu(int id, Menu menu, ActionGroup group, AnActionEvent event) {
+        AnAction[] children = group.getChildren(event);
+        if (children == null) {
+            return;
+        }
+
+        for (AnAction child : children) {
+            event.setPresentation(child.getTemplatePresentation());
+            child.update(event);
+            if (event.getPresentation()
+                    .isVisible()) {
+                MenuItem add = menu.add(id, Menu.NONE, Menu.NONE, event.getPresentation()
+                        .getText());
+                add.setEnabled(event.getPresentation()
+                                       .isEnabled());
+                add.setIcon(event.getPresentation()
+                                    .getIcon());
+                add.setOnMenuItemClickListener(item -> performAction(child, event));
+            }
+        }
     }
 
     private void fillSubMenu(SubMenu subMenu, AnAction action, AnActionEvent event) {
@@ -99,6 +134,10 @@ public class ActionManagerImpl extends ActionManager {
 
         if (isGroup(action)) {
             ActionGroup group = (ActionGroup) action;
+            if (!group.isPopup()) {
+                fillMenu(View.generateViewId(), subMenu, group, event);
+            }
+
             SubMenu subSubMenu = subMenu.addSubMenu(presentation.getText());
             menuItem = subSubMenu.getItem();
 
@@ -109,7 +148,8 @@ public class ActionManagerImpl extends ActionManager {
 
                     child.update(event);
 
-                    if (event.getPresentation().isVisible()) {
+                    if (event.getPresentation()
+                            .isVisible()) {
                         fillSubMenu(subSubMenu, child, event);
                     }
                 }
@@ -126,10 +166,27 @@ public class ActionManagerImpl extends ActionManager {
         }
         menuItem.setIcon(presentation.getIcon());
         menuItem.setContentDescription(presentation.getDescription());
-        menuItem.setOnMenuItemClickListener(item -> {
+        menuItem.setOnMenuItemClickListener(item -> performAction(action, event));
+    }
+
+    private boolean performAction(AnAction action, AnActionEvent event) {
+        try {
             action.actionPerformed(event);
-            return true;
-        });
+        } catch (Throwable e) {
+            ClipboardManager clipboardManager = event.getDataContext()
+                    .getSystemService(ClipboardManager.class);
+            new MaterialAlertDialogBuilder(event.getDataContext()).setTitle(
+                    "Unable to perform action")
+                    .setMessage(e.getMessage())
+                    .setPositiveButton(android.R.string.ok, null)
+                    .setNegativeButton(android.R.string.copy,
+                                       (d, w) -> clipboardManager.setPrimaryClip(
+                                               ClipData.newPlainText("Error report",
+                                                                     Log.getStackTraceString(e))))
+                    .show();
+            return false;
+        }
+        return true;
     }
 
     @Override

@@ -2,9 +2,8 @@ package com.tyron.code.ui.editor.shortcuts.action;
 
 import com.tyron.code.ui.editor.shortcuts.ShortcutAction;
 import com.tyron.code.ui.editor.shortcuts.ShortcutItem;
-
-import io.github.rosemoe.sora.text.Cursor;
-import io.github.rosemoe.sora.widget.CodeEditor;
+import com.tyron.editor.Caret;
+import com.tyron.editor.Editor;
 
 public class TextInsertAction implements ShortcutAction {
 
@@ -16,8 +15,8 @@ public class TextInsertAction implements ShortcutAction {
     }
 
     @Override
-    public void apply(CodeEditor editor, ShortcutItem item) {
-        Cursor cursor = editor.getCursor();
-        editor.getText().insert(cursor.getLeftLine(), cursor.getLeftColumn(), item.label);
+    public void apply(Editor editor, ShortcutItem item) {
+        Caret cursor = editor.getCaret();
+        editor.insert(cursor.getStartLine(), cursor.getEndColumn(), item.label);
     }
 }

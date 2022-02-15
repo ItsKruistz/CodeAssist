@@ -16,6 +16,7 @@ import androidx.viewpager2.widget.ViewPager2;
 
 import com.google.android.material.tabs.TabLayout;
 import com.google.android.material.tabs.TabLayoutMediator;
+import com.google.common.base.Strings;
 import com.tyron.builder.log.LogViewModel;
 import com.tyron.code.R;
 import com.tyron.code.ui.editor.impl.text.rosemoe.CodeEditorFragment;
@@ -28,7 +29,9 @@ import com.tyron.code.ui.editor.shortcuts.action.RedoAction;
 import com.tyron.code.ui.editor.shortcuts.action.TextInsertAction;
 import com.tyron.code.ui.editor.shortcuts.action.UndoAction;
 import com.tyron.code.ui.main.MainViewModel;
-import com.tyron.code.util.AndroidUtilities;
+import com.tyron.common.util.AndroidUtilities;
+import com.tyron.editor.Caret;
+import com.tyron.editor.Editor;
 import com.tyron.fileeditor.api.FileEditor;
 
 import java.util.ArrayList;
@@ -36,9 +39,6 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
-
-import io.github.rosemoe.sora.text.Cursor;
-import io.github.rosemoe.sora.widget.CodeEditor;
 
 @SuppressWarnings("FieldCanBeLocal")
 public class BottomEditorFragment extends Fragment {
@@ -151,9 +151,14 @@ public class BottomEditorFragment extends Fragment {
             }
 
             @Override
-            public void apply(CodeEditor editor, ShortcutItem item) {
-                Cursor cursor = editor.getCursor();
-                editor.getText().insert(cursor.getLeftLine(), cursor.getLeftColumn(), "\t");
+            public void apply(Editor editor, ShortcutItem item) {
+                Caret cursor = editor.getCaret();
+                if (editor.useTab()) {
+                    editor.insert(cursor.getStartLine(), cursor.getStartColumn(), "\t");
+                } else {
+                    editor.insert(cursor.getStartLine(), cursor.getStartColumn(),
+                            Strings.repeat(" ", editor.getTabCount()));
+                }
             }
         }), "->", "tab"));
         items.addAll(strings.stream()

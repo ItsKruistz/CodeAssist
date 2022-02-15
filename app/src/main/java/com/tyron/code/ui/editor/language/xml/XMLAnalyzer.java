@@ -17,11 +17,14 @@ import com.tyron.code.ui.editor.language.AbstractCodeAnalyzer;
 import com.tyron.code.ui.editor.language.HighlightUtil;
 import com.tyron.code.ui.project.ProjectManager;
 import com.tyron.code.util.ProjectUtils;
+import com.tyron.common.util.Debouncer;
 import com.tyron.completion.index.CompilerService;
-import com.tyron.completion.java.compiler.CompilerContainer;
 import com.tyron.completion.java.JavaCompilerProvider;
+import com.tyron.completion.java.compiler.CompilerContainer;
 import com.tyron.completion.java.compiler.JavaCompilerService;
+import com.tyron.completion.progress.ProgressManager;
 import com.tyron.completion.xml.lexer.XMLLexer;
+import com.tyron.editor.Editor;
 
 import org.antlr.v4.runtime.CharStream;
 import org.antlr.v4.runtime.Lexer;
@@ -32,32 +35,34 @@ import java.io.File;
 import java.io.IOException;
 import java.lang.ref.WeakReference;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.Stack;
 import java.util.concurrent.Executors;
+import java.util.stream.Collectors;
 
-import io.github.rosemoe.sora.data.BlockLine;
-import io.github.rosemoe.sora.data.Span;
-import io.github.rosemoe.sora.text.TextAnalyzeResult;
-import io.github.rosemoe.sora.widget.CodeEditor;
-import io.github.rosemoe.sora.widget.EditorColorScheme;
+import io.github.rosemoe.sora.lang.styling.CodeBlock;
+import io.github.rosemoe.sora.lang.styling.MappedSpans;
+import io.github.rosemoe.sora.lang.styling.Span;
+import io.github.rosemoe.sora.lang.styling.Styles;
+import io.github.rosemoe.sora.lang.styling.TextStyle;
+import io.github.rosemoe.sora.widget.schemes.EditorColorScheme;
+import kotlin.Unit;
 
-public class XMLAnalyzer extends AbstractCodeAnalyzer {
+public class XMLAnalyzer extends AbstractCodeAnalyzer<Object> {
 
-    private final WeakReference<CodeEditor> mEditorReference;
-    private final Stack<BlockLine> mBlockLine = new Stack<>();
+    private static final Debouncer sDebouncer = new Debouncer(Duration.ofMillis(900L));
+
+    private final WeakReference<Editor> mEditorReference;
+    private final Stack<CodeBlock> mBlockLine = new Stack<>();
     private int mMaxSwitch = 1;
     private int mCurrSwitch = 0;
-    private List<DiagnosticWrapper> mDiagnostics = new ArrayList<>();
 
-    public XMLAnalyzer(CodeEditor codeEditor) {
+    public XMLAnalyzer(Editor codeEditor) {
         mEditorReference = new WeakReference<>(codeEditor);
-    }
-
-    @Override
-    public void setDiagnostics(List<DiagnosticWrapper> diagnostics) {
-        mDiagnostics = diagnostics;
     }
 
     @Override
@@ -67,7 +72,7 @@ public class XMLAnalyzer extends AbstractCodeAnalyzer {
 
     @Override
     public void analyzeInBackground(CharSequence contents) {
-        CodeEditor editor = mEditorReference.get();
+        Editor editor = mEditorReference.get();
         if (editor == null) {
             return;
         }
@@ -79,35 +84,49 @@ public class XMLAnalyzer extends AbstractCodeAnalyzer {
 
         List<DiagnosticWrapper> diagnosticWrappers = new ArrayList<>();
 
-        compile(currentFile, contents.toString(), new ILogger() {
-            @Override
-            public void info(DiagnosticWrapper wrapper) {
-                addMaybe(wrapper);
-            }
+        ProgressManager.getInstance().runLater(() -> editor.setAnalyzing(true));
 
-            @Override
-            public void debug(DiagnosticWrapper wrapper) {
-                addMaybe(wrapper);
-            }
-
-            @Override
-            public void warning(DiagnosticWrapper wrapper) {
-                addMaybe(wrapper);
-            }
-
-            @Override
-            public void error(DiagnosticWrapper wrapper) {
-                addMaybe(wrapper);
-            }
-
-            private void addMaybe(DiagnosticWrapper wrapper) {
-                if (currentFile.equals(wrapper.getSource())) {
-                    diagnosticWrappers.add(wrapper);
+        sDebouncer.cancel();
+        sDebouncer.schedule(cancel -> {
+            compile(currentFile, contents.toString(), new ILogger() {
+                @Override
+                public void info(DiagnosticWrapper wrapper) {
+                    addMaybe(wrapper);
                 }
+
+                @Override
+                public void debug(DiagnosticWrapper wrapper) {
+                    addMaybe(wrapper);
+                }
+
+                @Override
+                public void warning(DiagnosticWrapper wrapper) {
+                    addMaybe(wrapper);
+                }
+
+                @Override
+                public void error(DiagnosticWrapper wrapper) {
+                    addMaybe(wrapper);
+                }
+
+                private void addMaybe(DiagnosticWrapper wrapper) {
+                    if (currentFile.equals(wrapper.getSource())) {
+                        diagnosticWrappers.add(wrapper);
+                    }
+                }
+            });
+
+            if (!cancel.invoke()) {
+                ProgressManager.getInstance().runLater(() -> {
+                    editor.setDiagnostics(diagnosticWrappers.stream()
+                            .filter(it -> it.getLineNumber() > 0)
+                            .collect(Collectors.toList()));
+                    ProgressManager.getInstance().runLater(() -> editor.setAnalyzing(false), 300);
+                });
             }
-        }, () -> {
-            editor.setDiagnostics(diagnosticWrappers);
+            return Unit.INSTANCE;
         });
+
     }
 
     @Override
@@ -124,7 +143,7 @@ public class XMLAnalyzer extends AbstractCodeAnalyzer {
     }
 
     @Override
-    public boolean onNextToken(Token token, TextAnalyzeResult colors) {
+    public boolean onNextToken(Token token, Styles styles, MappedSpans.Builder colors) {
         int line = token.getLine() - 1;
         int column = token.getCharPositionInLine();
 
@@ -132,15 +151,15 @@ public class XMLAnalyzer extends AbstractCodeAnalyzer {
 
         switch (token.getType()) {
             case XMLLexer.COMMENT:
-                colors.addIfNeeded(line, column, EditorColorScheme.COMMENT);
+                colors.addIfNeeded(line, column, TextStyle.makeStyle(EditorColorScheme.COMMENT));
                 return true;
             case XMLLexer.Name:
                 if (previous != null && previous.getType() == XMLLexer.SLASH) {
-                    colors.addIfNeeded(line, column, EditorColorScheme.HTML_TAG);
+                    colors.addIfNeeded(line, column, TextStyle.makeStyle(EditorColorScheme.HTML_TAG));
                     return true;
                 } else if (previous != null && previous.getType() == XMLLexer.OPEN) {
-                    colors.addIfNeeded(line, column, EditorColorScheme.HTML_TAG);
-                    BlockLine block = new BlockLine();
+                    colors.addIfNeeded(line, column, TextStyle.makeStyle(EditorColorScheme.HTML_TAG));
+                    CodeBlock block = new CodeBlock();
                     block.startLine = previous.getLine() - 1;
                     block.startColumn = previous.getCharPositionInLine();
                     mBlockLine.push(block);
@@ -156,20 +175,27 @@ public class XMLAnalyzer extends AbstractCodeAnalyzer {
                 colors.addIfNeeded(line, column, EditorColorScheme.IDENTIFIER_NAME);
                 return true;
             case XMLLexer.EQUALS:
-                Span span1 = colors.addIfNeeded(line, column, EditorColorScheme.OPERATOR);
-                span1.setUnderlineColor(Color.TRANSPARENT);
+                colors.addIfNeeded(line, column, EditorColorScheme.OPERATOR);
                 return true;
             case XMLLexer.STRING:
                 String text = token.getText();
                 if (text.startsWith("\"#")) {
                     try {
                         int color = Color.parseColor(text.substring(1, text.length() - 1));
-                        colors.addIfNeeded(line, Span.obtain(column, EditorColorScheme.LITERAL));
-                        colors.add(line, Span.obtain(column + 1, EditorColorScheme.LITERAL)).setUnderlineColor(color);
-                        colors.add(line, Span.obtain(column + text.length() - 1,
-                                EditorColorScheme.LITERAL)).setUnderlineColor(Color.TRANSPARENT);
-                        colors.addIfNeeded(line, column + text.length(),
-                                EditorColorScheme.TEXT_NORMAL).setUnderlineColor(Color.TRANSPARENT);
+                        colors.addIfNeeded(line, column, EditorColorScheme.LITERAL);
+
+                        Span span = Span.obtain(column + 1, EditorColorScheme.LITERAL);
+                        span.setUnderlineColor(color);
+                        colors.add(line, span);
+
+                        Span middle = Span.obtain(column + text.length() - 1,
+                                EditorColorScheme.LITERAL);
+                        middle.setUnderlineColor(Color.TRANSPARENT);
+                        colors.add(line, middle);
+
+                        Span end = Span.obtain(column + text.length(), TextStyle.makeStyle(EditorColorScheme.TEXT_NORMAL));
+                        end.setUnderlineColor(Color.TRANSPARENT);
+                        colors.add(line, end);
                         break;
                     } catch (Exception ignore) {
                     }
@@ -179,45 +205,43 @@ public class XMLAnalyzer extends AbstractCodeAnalyzer {
             case XMLLexer.SLASH_CLOSE:
                 colors.addIfNeeded(line, column, EditorColorScheme.HTML_TAG);
                 if (!mBlockLine.isEmpty()) {
-                    BlockLine block = mBlockLine.pop();
+                    CodeBlock block = mBlockLine.pop();
                     block.endLine = line;
                     block.endColumn = column;
                     if (block.startLine != block.endLine) {
-                        if (previous.getLine() == token.getLine()) {
+                        if (previous != null && previous.getLine() == token.getLine()) {
                             block.toBottomOfEndLine = true;
                         }
-                        colors.addBlockLine(block);
+                        styles.addCodeBlock(block);
                     }
                 }
                 return true;
             case XMLLexer.SLASH:
-                colors.addIfNeeded(line, column, EditorColorScheme.HTML_TAG);
+                colors.addIfNeeded(line, column, TextStyle.makeStyle(EditorColorScheme.HTML_TAG));
                 if (previous != null && previous.getType() == XMLLexer.OPEN) {
                     if (!mBlockLine.isEmpty()) {
-                        BlockLine block = mBlockLine.pop();
+                        CodeBlock block = mBlockLine.pop();
                         block.endLine = previous.getLine() - 1;
                         block.endColumn = previous.getCharPositionInLine();
                         if (block.startLine != block.endLine) {
                             if (previous.getLine() == token.getLine()) {
                                 block.toBottomOfEndLine = true;
                             }
-                            colors.addBlockLine(block);
+                            styles.addCodeBlock(block);
                         }
                     }
                 }
                 return true;
             case XMLLexer.OPEN:
             case XMLLexer.CLOSE:
-                colors.addIfNeeded(line, column, EditorColorScheme.HTML_TAG);
+                colors.addIfNeeded(line, column, TextStyle.makeStyle(EditorColorScheme.HTML_TAG));
                 return true;
             case XMLLexer.SEA_WS:
             case XMLLexer.S:
                 // skip white spaces
                 return true;
             default:
-                Span s = Span.obtain(column, EditorColorScheme.TEXT_NORMAL);
-                colors.addIfNeeded(line, s);
-                s.setUnderlineColor(Color.TRANSPARENT);
+                colors.addIfNeeded(line, column, TextStyle.makeStyle(EditorColorScheme.TEXT_NORMAL));
                 return true;
         }
 
@@ -225,19 +249,16 @@ public class XMLAnalyzer extends AbstractCodeAnalyzer {
     }
 
     @Override
-    protected void afterAnalyze(CharSequence content, TextAnalyzeResult colors) {
+    protected void afterAnalyze(CharSequence content, Styles styles, MappedSpans.Builder colors) {
         if (mBlockLine.isEmpty()) {
             if (mCurrSwitch > mMaxSwitch) {
                 mMaxSwitch = mCurrSwitch;
             }
         }
-        colors.setSuppressSwitch(mMaxSwitch + 10);
+        styles.setSuppressSwitch(mMaxSwitch + 10);
 
-        CodeEditor editor = mEditorReference.get();
-        if (editor != null) {
-            for (DiagnosticWrapper diagnostic : mDiagnostics) {
-                HighlightUtil.setErrorSpan(colors, diagnostic.getStartLine());
-            }
+        for (DiagnosticWrapper d : mDiagnostics) {
+            HighlightUtil.setErrorSpan(styles, d.getStartLine());
         }
     }
 
@@ -245,112 +266,65 @@ public class XMLAnalyzer extends AbstractCodeAnalyzer {
     long delay = 1000L;
     long lastTime;
 
-    private void compile(File file, String contents, ILogger logger, Runnable callback) {
-        handler.removeCallbacks(runnable);
-        lastTime = System.currentTimeMillis();
-        runnable.setContents(contents);
-        runnable.setFile(file);
-        runnable.setLogger(logger);
-        runnable.setCallback(callback);
-        handler.postDelayed(runnable, delay);
-    }
+    private void compile(File file, String contents, ILogger logger) {
+        boolean isResource = ProjectUtils.isResourceXMLFile(file);
 
-    CompileRunnable runnable = new CompileRunnable();
-
-    private class CompileRunnable implements Runnable {
-
-        private ILogger logger;
-        private File file;
-        private String contents;
-        private Runnable callback;
-
-        public CompileRunnable() {
-        }
-
-        public void setCallback(Runnable callback) {
-            this.callback = callback;
-        }
-
-        public void setLogger(ILogger logger) {
-            this.logger = logger;
-        }
-
-        public void setFile(File file) {
-            this.file = file;
-        }
-
-        private void setContents(String contents) {
-            this.contents = contents;
-        }
-
-        @Override
-        public void run() {
-            if (logger == null) {
-                return;
-            }
-            if (System.currentTimeMillis() < (lastTime - 500)) {
-                return;
-            }
-
-            Executors.newSingleThreadExecutor().execute(() -> {
-                if (file == null || logger == null || contents == null) {
-                    return;
-                }
-                boolean isResource = ProjectUtils.isResourceXMLFile(file);
-
-                if (isResource) {
-                    Project project = ProjectManager.getInstance().getCurrentProject();
-                    if (project != null) {
-                        Module module = project.getModule(file);
-                        if (module instanceof AndroidModule) {
-                            try {
-                                doGenerate(project, (AndroidModule) module, file, contents);
-                            } catch (IOException | CompilationFailedException e) {
-                                if (BuildConfig.DEBUG) {
-                                    Log.e("XMLAnalyzer", "Failed compiling", e);
-                                }
-                            }
+        if (isResource) {
+            Project project = ProjectManager.getInstance().getCurrentProject();
+            if (project != null) {
+                Module module = project.getModule(file);
+                if (module instanceof AndroidModule) {
+                    try {
+                        doGenerate(project, (AndroidModule) module, file, contents, logger);
+                    } catch (IOException | CompilationFailedException e) {
+                        if (BuildConfig.DEBUG) {
+                            Log.e("XMLAnalyzer", "Failed compiling", e);
                         }
                     }
                 }
-            });
+            }
+        }
+    }
+
+    private void doGenerate(Project project, AndroidModule module, File file,
+                            String contents, ILogger logger) throws IOException, CompilationFailedException {
+        if (!file.canWrite() || !file.canRead()) {
+            return;
         }
 
-        private void doGenerate(Project project, AndroidModule module, File file,
-                                String contents) throws IOException, CompilationFailedException {
-            if (!file.canWrite() || !file.canRead()) {
-                return;
-            }
+        if (!module.getFileManager().isOpened(file)) {
+            Log.e("XMLAnalyzer", "File is not yet opened!");
+            return;
+        }
 
-            FileUtils.writeStringToFile(file, contents, StandardCharsets.UTF_8);
-            IncrementalAapt2Task task = new IncrementalAapt2Task(module, logger, false);
+        Optional<CharSequence> fileContent = module.getFileManager().getFileContent(file);
+        if (!fileContent.isPresent()) {
+            Log.e("XMLAnalyzer", "No snapshot for file found.");
+            return;
+        }
 
-            try {
-                task.prepare(BuildType.DEBUG);
-                task.run();
-            } catch (CompilationFailedException e) {
-                if (callback != null) {
-                    handler.post(callback);
-                }
-                throw e;
-            }
+        contents = fileContent.get().toString();
+        FileUtils.writeStringToFile(file, contents, StandardCharsets.UTF_8);
+        IncrementalAapt2Task task = new IncrementalAapt2Task(module, logger, false);
 
-            if (callback != null) {
-                handler.post(callback);
-            }
+        try {
+            task.prepare(BuildType.DEBUG);
+            task.run();
+        } catch (CompilationFailedException e) {
+            throw e;
+        }
 
-            // work around to refresh R.java file
-            File resourceClass = module.getJavaFile(module.getPackageName() + ".R");
-            if (resourceClass != null) {
-                JavaCompilerProvider provider =
-                        CompilerService.getInstance().getIndex(JavaCompilerProvider.KEY);
-                JavaCompilerService service = provider.getCompiler(project, module);
+        // work around to refresh R.java file
+        File resourceClass = module.getJavaFile(module.getPackageName() + ".R");
+        if (resourceClass != null) {
+            JavaCompilerProvider provider =
+                    CompilerService.getInstance().getIndex(JavaCompilerProvider.KEY);
+            JavaCompilerService service = provider.getCompiler(project, module);
 
-                CompilerContainer container = service.compile(resourceClass.toPath());
-                container.run(__ -> {
+            CompilerContainer container = service.compile(resourceClass.toPath());
+            container.run(__ -> {
 
-                });
-            }
+            });
         }
     }
 }

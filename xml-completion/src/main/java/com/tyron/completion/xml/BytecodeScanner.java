@@ -28,11 +28,22 @@ import java.util.jar.JarFile;
  */
 public class BytecodeScanner {
 
-    private static boolean sBootScanned = false;
+    public static void loadJar(File jar) throws IOException {
+        try (JarFile jarFile = new JarFile(jar)) {
+            Enumeration<JarEntry> entries = jarFile.entries();
+            while (entries.hasMoreElements()) {
+                JarEntry element = entries.nextElement();
+                if (!element.getName().endsWith(".class")) {
+                    continue;
+                }
+                ClassParser classParser = new ClassParser(jar.getAbsolutePath(), element.getName());
+                JavaClass parse = classParser.parse();
+                Repository.addClass(parse);
+            }
+        }
+    }
 
     public static List<JavaClass> scan(File file) throws IOException {
-        scanBootstrapIfNeeded();
-
         String path = file.getAbsolutePath();
         List<JavaClass> viewClasses = new ArrayList<>();
         try (JarFile jarFile = new JarFile(file)) {
@@ -67,10 +78,11 @@ public class BytecodeScanner {
         return false;
     }
 
-    private static void scanBootstrapIfNeeded() {
-        if (sBootScanned) {
+    public static void scanBootstrapIfNeeded() {
+        if (!needScanBootstrap()) {
             return;
         }
+
         File androidJar = BuildModule.getAndroidJar();
         if (androidJar != null && androidJar.exists()) {
             try (JarFile jarFile = new JarFile(androidJar)) {
@@ -88,8 +100,15 @@ public class BytecodeScanner {
             } catch (IOException e) {
                 // ignored
             }
+        }
+    }
 
-            sBootScanned = true;
+    private static boolean needScanBootstrap() {
+        try {
+            Repository.getRepository().loadClass(View.class);
+            return false;
+        } catch (ClassNotFoundException e) {
+            return true;
         }
     }
 

@@ -39,7 +39,13 @@ public class SourcePath {
 
     private final CompilerClassPath cp;
     private final Map<URI, SourceFile> files = new HashMap<>();
-    private final ReentrantLock parsedDataWriteLock = new ReentrantLock();
+    private final FakeLock parsedDataWriteLock = new FakeLock();
+
+    public static class FakeLock {
+        public void lock() {}
+        public void unlock() {}
+    }
+
     private final AsyncExecutor indexAsync = new AsyncExecutor();
     private final SymbolIndex index = new SymbolIndex();
     private boolean indexEnabled = false;
@@ -168,7 +174,7 @@ public class SourcePath {
             parseIfChanged();
             if (isTemporary) {
                 Set<KtFile> all = all(false);
-                Sequence<KtFile> plus = SequencesKt.plus(SequencesKt.asSequence(all.iterator()), (KtFile) SequencesKt.sequenceOf(parsed));
+                Sequence<KtFile> plus = SequencesKt.plus(SequencesKt.asSequence(all.iterator()), SequencesKt.sequenceOf(parsed));
                 return SequencesKt.toList(plus);
             } else {
                 return all(false);
@@ -231,7 +237,8 @@ public class SourcePath {
             return sourceFile.parsed;
         });
         Set<KtFile> all = all(false);
-        Pair<BindingContext, ComponentProvider> pair = cp.getCompiler().compileKtFiles(parse.values(), all, CompletionKind.DEFAULT);
+        Pair<BindingContext, ComponentProvider> pair = cp.getCompiler()
+                .compileKtFiles(parse.values(), all, CompletionKind.DEFAULT);
 
         parse.forEach((f, parsed) -> {
             parsedDataWriteLock.lock();

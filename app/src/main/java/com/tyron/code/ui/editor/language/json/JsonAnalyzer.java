@@ -8,13 +8,14 @@ import org.antlr.v4.runtime.Token;
 
 import java.util.Stack;
 
-import io.github.rosemoe.sora.data.BlockLine;
-import io.github.rosemoe.sora.text.TextAnalyzeResult;
-import io.github.rosemoe.sora.widget.EditorColorScheme;
+import io.github.rosemoe.sora.lang.styling.CodeBlock;
+import io.github.rosemoe.sora.lang.styling.MappedSpans;
+import io.github.rosemoe.sora.lang.styling.Styles;
+import io.github.rosemoe.sora.widget.schemes.EditorColorScheme;
 
-public class JsonAnalyzer extends AbstractCodeAnalyzer {
+public class JsonAnalyzer extends AbstractCodeAnalyzer<Object> {
 
-    private final Stack<BlockLine> mBlockLines = new Stack<>();
+    private final Stack<CodeBlock> mBlockLines = new Stack<>();
     private int mMaxSwitch;
     private int mCurrSwitch;
 
@@ -26,7 +27,7 @@ public class JsonAnalyzer extends AbstractCodeAnalyzer {
     @Override
     public void setup() {
         putColor(EditorColorScheme.TEXT_NORMAL, JSONLexer.LBRACKET,
-                JSONLexer.RBRACKET);
+                JSONLexer.RBRACKET, JSONLexer.LBRACE, JSONLexer.RBRACE);
         putColor(EditorColorScheme.KEYWORD, JSONLexer.TRUE,
                 JSONLexer.FALSE, JSONLexer.NULL,
                 JSONLexer.COLON, JSONLexer.COMMA);
@@ -48,7 +49,7 @@ public class JsonAnalyzer extends AbstractCodeAnalyzer {
     }
 
     @Override
-    public boolean onNextToken(Token currentToken, TextAnalyzeResult colors) {
+    public boolean onNextToken(Token currentToken, Styles styles, MappedSpans.Builder colors) {
         int line = currentToken.getLine() - 1;
         int column = currentToken.getCharPositionInLine();
 
@@ -62,17 +63,17 @@ public class JsonAnalyzer extends AbstractCodeAnalyzer {
                     }
                 }
                 break;
-            case JSONLexer.RBRACKET:
+            case JSONLexer.RBRACE:
                 if (!mBlockLines.isEmpty()) {
-                    BlockLine b = mBlockLines.pop();
+                    CodeBlock b = mBlockLines.pop();
                     b.endLine = line;
                     b.endColumn = column;
                     if (b.startLine != b.endLine) {
-                        colors.addBlockLine(b);
+                        styles.addCodeBlock(b);
                     }
                 }
                 return false;
-            case JSONLexer.LBRACKET:
+            case JSONLexer.LBRACE:
                 if (mBlockLines.isEmpty()) {
                     if (mCurrSwitch > mMaxSwitch) {
                         mMaxSwitch = mCurrSwitch;
@@ -80,7 +81,7 @@ public class JsonAnalyzer extends AbstractCodeAnalyzer {
                     mCurrSwitch = 0;
                 }
                 mCurrSwitch++;
-                BlockLine block = colors.obtainNewBlock();
+                CodeBlock block = styles.obtainNewBlock();
                 block.startLine = line;
                 block.startColumn = column;
                 mBlockLines.push(block);
@@ -90,12 +91,12 @@ public class JsonAnalyzer extends AbstractCodeAnalyzer {
     }
 
     @Override
-    protected void afterAnalyze(CharSequence content, TextAnalyzeResult colors) {
+    protected void afterAnalyze(CharSequence content, Styles styles, MappedSpans.Builder colors) {
         if (mBlockLines.isEmpty()) {
             if (mMaxSwitch > mCurrSwitch) {
                 mMaxSwitch = mCurrSwitch;
             }
         }
-        colors.setSuppressSwitch(mMaxSwitch + 10);
+        styles.setSuppressSwitch(mMaxSwitch + 10);
     }
 }

@@ -48,7 +48,7 @@ public class PrintHelper {
             buf.append("protected ");
         }
 
-        buf.append(EditHelper.printType(parameterizedType.getReturnType())).append(" ");
+        buf.append(PrintHelper.printType(parameterizedType.getReturnType())).append(" ");
 
         buf.append(method.getSimpleName()).append("(");
         if (source == null) {
@@ -72,7 +72,7 @@ public class PrintHelper {
             buf.append("protected ");
         }
 
-        buf.append(EditHelper.printType(parameterizedType.getReturnType())).append(" ");
+        buf.append(PrintHelper.printType(parameterizedType.getReturnType())).append(" ");
 
         buf.append(method.getSimpleName()).append("(");
         if (source == null) {
@@ -101,7 +101,7 @@ public class PrintHelper {
     public static String printParameters(ExecutableType method, MethodTree source) {
         StringJoiner join = new StringJoiner(", ");
         for (int i = 0; i < method.getParameterTypes().size(); i++) {
-            String type = method.getParameterTypes().get(i).toString();
+            String type = printType(method.getParameterTypes().get(i));
             Name name = source.getParameters().get(i).getName();
             join.add(type + " " + name);
         }
@@ -127,7 +127,7 @@ public class PrintHelper {
             DeclaredType declared = (DeclaredType) type;
             if (declared instanceof Type.ClassType) {
                 Type.ClassType classType = (Type.ClassType) declared;
-                if (classType.all_interfaces_field != null) {
+                if (classType.all_interfaces_field != null && !classType.all_interfaces_field.isEmpty()) {
                     Type next = classType.all_interfaces_field.get(0);
                     declared = (DeclaredType) next;
                 }

@@ -2,6 +2,7 @@ package com.tyron.completion.xml.util;
 
 import android.view.View;
 import android.view.ViewGroup;
+import android.webkit.WebView;
 import android.widget.AbsoluteLayout;
 import android.widget.Button;
 import android.widget.CalendarView;
@@ -21,6 +22,7 @@ import android.widget.TableLayout;
 import android.widget.TextView;
 import android.widget.ViewFlipper;
 import android.widget.ViewSwitcher;
+import android.widget.ZoomButton;
 
 import androidx.annotation.NonNull;
 
@@ -70,6 +72,20 @@ public class StyleUtils {
         putStyle(DatePicker.class);
         putStyle(ViewFlipper.class);
         putStyle(ViewSwitcher.class);
+        putStyle(AbsoluteLayout.class);
+        putStyle(ZoomButton.class);
+        putStyle(WebView.class);
+    }
+
+    public static Set<String> getClasses(String... classNames) {
+        ImmutableSet.Builder<String> classes = ImmutableSet.builder();
+        for (String className : classNames) {
+            ImmutableSet<String> strings = sViewStyleMap.get(className);
+            if (strings != null) {
+                classes.addAll(strings);
+            }
+        }
+        return classes.build();
     }
 
     public static void putStyles(JavaClass javaClass) {
@@ -196,7 +212,7 @@ public class StyleUtils {
             return params;
         }
         params.add(map.get(simpleName));
-
+        params.add(map.get("ViewGroup_MarginLayout"));
         ImmutableSet<String> strings = sLayoutParamsMap.get(simpleName);
         if (strings != null) {
             for (String string : strings) {

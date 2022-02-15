@@ -3,26 +3,34 @@ package com.tyron.code.ui.editor.language.java;
 import android.content.SharedPreferences;
 import android.util.Log;
 
-import androidx.preference.PreferenceManager;
-
 import com.tyron.builder.model.DiagnosticWrapper;
 import com.tyron.builder.model.SourceFileObject;
 import com.tyron.builder.project.Project;
 import com.tyron.builder.project.api.JavaModule;
 import com.tyron.builder.project.api.Module;
+import com.tyron.code.ApplicationLoader;
 import com.tyron.code.BuildConfig;
+import com.tyron.code.ui.editor.impl.text.rosemoe.CodeEditorView;
+import com.tyron.code.ui.editor.language.AbstractCodeAnalyzer;
 import com.tyron.code.ui.editor.language.HighlightUtil;
+import com.tyron.code.ui.editor.language.kotlin.KotlinLexer;
 import com.tyron.code.ui.project.ProjectManager;
+import com.tyron.common.SharedPreferenceKeys;
 import com.tyron.common.util.Debouncer;
 import com.tyron.completion.index.CompilerService;
+import com.tyron.completion.java.JavaCompilerProvider;
 import com.tyron.completion.java.compiler.CompileTask;
 import com.tyron.completion.java.compiler.CompilerContainer;
 import com.tyron.completion.java.compiler.JavaCompilerService;
-import com.tyron.completion.java.JavaCompilerProvider;
 import com.tyron.completion.java.provider.CompletionEngine;
 import com.tyron.completion.java.util.ErrorCodes;
 import com.tyron.completion.java.util.TreeUtil;
+import com.tyron.completion.progress.ProgressManager;
+import com.tyron.editor.Editor;
 
+import org.antlr.v4.runtime.CharStream;
+import org.antlr.v4.runtime.Lexer;
+import org.jetbrains.kotlin.com.intellij.util.ReflectionUtil;
 import org.openjdk.javax.tools.Diagnostic;
 import org.openjdk.javax.tools.JavaFileObject;
 import org.openjdk.source.tree.BlockTree;
@@ -37,7 +45,9 @@ import org.openjdk.tools.javac.api.ClientCodeWrapper;
 import org.openjdk.tools.javac.tree.JCTree;
 import org.openjdk.tools.javac.util.JCDiagnostic;
 
+import java.io.File;
 import java.lang.ref.WeakReference;
+import java.lang.reflect.Field;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -46,65 +56,74 @@ import java.util.List;
 import java.util.Stack;
 import java.util.stream.Collectors;
 
-import io.github.rosemoe.sora.data.BlockLine;
-import io.github.rosemoe.sora.data.NavigationItem;
-import io.github.rosemoe.sora.langs.java.JavaCodeAnalyzer;
-import io.github.rosemoe.sora.langs.java.JavaTextTokenizer;
-import io.github.rosemoe.sora.langs.java.Tokens;
+import io.github.rosemoe.editor.langs.java.JavaTextTokenizer;
+import io.github.rosemoe.editor.langs.java.Tokens;
+import io.github.rosemoe.sora.lang.analysis.SimpleAnalyzeManager;
+import io.github.rosemoe.sora.lang.styling.CodeBlock;
+import io.github.rosemoe.sora.lang.styling.MappedSpans;
+import io.github.rosemoe.sora.lang.styling.Styles;
 import io.github.rosemoe.sora.text.LineNumberCalculator;
-import io.github.rosemoe.sora.text.TextAnalyzeResult;
-import io.github.rosemoe.sora.text.TextAnalyzer;
-import io.github.rosemoe.sora.widget.CodeEditor;
-import io.github.rosemoe.sora.widget.EditorColorScheme;
+import io.github.rosemoe.sora.widget.schemes.EditorColorScheme;
 import kotlin.Unit;
 import kotlin.jvm.functions.Function0;
 
-public class JavaAnalyzer extends JavaCodeAnalyzer {
+public class JavaAnalyzer extends AbstractCodeAnalyzer<Object> {
+
     private static final Debouncer sDebouncer = new Debouncer(Duration.ofMillis(700));
     private static final String TAG = JavaAnalyzer.class.getSimpleName();
     /**
      * These are tokens that cannot exist before a valid function identifier
      */
-    private static final Tokens[] sKeywordsBeforeFunctionName = new Tokens[]{Tokens.RETURN,
-            Tokens.BREAK, Tokens.IF, Tokens.AND, Tokens.OR, Tokens.OREQ, Tokens.OROR,
-            Tokens.ANDAND, Tokens.ANDEQ, Tokens.RPAREN, Tokens.LPAREN, Tokens.LBRACE, Tokens.NEW,
-            Tokens.DOT, Tokens.SEMICOLON, Tokens.EQ, Tokens.NOTEQ, Tokens.NOT, Tokens.RBRACE,
-            Tokens.COMMA, Tokens.PLUS, Tokens.PLUSEQ, Tokens.MINUS, Tokens.MINUSEQ, Tokens.MULT,
-            Tokens.MULTEQ, Tokens.DIV, Tokens.DIVEQ};
+    private static final Tokens[] sKeywordsBeforeFunctionName =
+            new Tokens[]{Tokens.RETURN, Tokens.BREAK, Tokens.IF, Tokens.AND, Tokens.OR, Tokens.OREQ,
+                    Tokens.OROR, Tokens.ANDAND, Tokens.ANDEQ, Tokens.RPAREN, Tokens.LPAREN, Tokens.LBRACE, Tokens.NEW,
+                    Tokens.DOT, Tokens.SEMICOLON, Tokens.EQ, Tokens.NOTEQ, Tokens.NOT, Tokens.RBRACE,
+                    Tokens.COMMA, Tokens.PLUS, Tokens.PLUSEQ, Tokens.MINUS, Tokens.MINUSEQ, Tokens.MULT,
+                    Tokens.MULTEQ, Tokens.DIV, Tokens.DIVEQ};
 
-    private final WeakReference<CodeEditor> mEditorReference;
+    private final WeakReference<Editor> mEditorReference;
     private List<DiagnosticWrapper> mDiagnostics;
     private final List<DiagnosticWrapper> mPreviousDiagnostics = new ArrayList<>();
     private final SharedPreferences mPreferences;
 
-    public JavaAnalyzer(CodeEditor editor) {
+    public JavaAnalyzer(Editor editor) {
         mEditorReference = new WeakReference<>(editor);
-        mPreferences = PreferenceManager.getDefaultSharedPreferences(editor.getContext());
+        mPreferences = ApplicationLoader.getDefaultPreferences();
         mDiagnostics = new ArrayList<>();
     }
 
     @Override
-    public void setDiagnostics(List<DiagnosticWrapper> diagnostics) {
+    public void setDiagnostics(Editor editor, List<DiagnosticWrapper> diagnostics) {
         mDiagnostics = diagnostics;
     }
 
     @Override
+    public Lexer getLexer(CharStream input) {
+        return new KotlinLexer(input);
+    }
+
+    @Override
     public void analyzeInBackground(CharSequence contents) {
+        sDebouncer.cancel();
         sDebouncer.schedule(cancel -> {
             doAnalyzeInBackground(cancel, contents);
             return Unit.INSTANCE;
         });
     }
 
-    private JavaCompilerService getCompiler(CodeEditor editor) {
-        Project project = ProjectManager.getInstance().getCurrentProject();
+    private JavaCompilerService getCompiler(Editor editor) {
+        Project project = ProjectManager.getInstance()
+                .getCurrentProject();
         if (project == null) {
+            return null;
+        }
+        if (project.isCompiling()) {
             return null;
         }
         Module module = project.getModule(editor.getCurrentFile());
         if (module instanceof JavaModule) {
-            JavaCompilerProvider provider =
-                    CompilerService.getInstance().getIndex(JavaCompilerProvider.KEY);
+            JavaCompilerProvider provider = CompilerService.getInstance()
+                    .getIndex(JavaCompilerProvider.KEY);
             if (provider != null) {
                 return provider.getCompiler(project, (JavaModule) module);
             }
@@ -113,32 +132,45 @@ public class JavaAnalyzer extends JavaCodeAnalyzer {
     }
 
     private void doAnalyzeInBackground(Function0<Boolean> cancel, CharSequence contents) {
-        CodeEditor editor = mEditorReference.get();
+        Editor editor = mEditorReference.get();
         if (editor == null) {
             return;
         }
         if (cancel.invoke()) {
             return;
         }
+
         // do not compile the file if it not yet closed as it will cause issues when
         // compiling multiple files at the same time
-        if (mPreferences.getBoolean("code_editor_error_highlight", true) && !CompletionEngine.isIndexing()) {
+        if (mPreferences.getBoolean(SharedPreferenceKeys.JAVA_ERROR_HIGHLIGHTING, true)) {
             JavaCompilerService service = getCompiler(editor);
             if (service != null) {
+                File currentFile = editor.getCurrentFile();
+                if (currentFile == null) {
+                    return;
+                }
+                Module module = ProjectManager.getInstance().getCurrentProject().getModule(currentFile);
+                if (!module.getFileManager().isOpened(currentFile)) {
+                    return;
+                }
                 try {
-                    SourceFileObject sourceFileObject =
-                            new SourceFileObject(editor.getCurrentFile().toPath(),
-                                    contents.toString(), Instant.now());
-                    CompilerContainer container =
-                                 service.compile(Collections.singletonList(sourceFileObject));
+                    ProgressManager.getInstance()
+                            .runLater(() -> editor.setAnalyzing(true));
+                    SourceFileObject sourceFileObject = new SourceFileObject(currentFile
+                                                                                     .toPath(),
+                                                                             contents.toString(),
+                                                                             Instant.now());
+                    CompilerContainer container = service.compile(Collections.singletonList(sourceFileObject));
                     container.run(task -> {
                         if (!cancel.invoke()) {
-                            List<DiagnosticWrapper> collect =
-                                    task.diagnostics.stream()
-                                            .map(DiagnosticWrapper::new)
-                                           // .map(d -> modifyDiagnostic(task, d))
-                                            .collect(Collectors.toList());
+                            List<DiagnosticWrapper> collect = task.diagnostics.stream()
+                                    .map(d -> modifyDiagnostic(task, d))
+                                    .peek(it -> ProgressManager.checkCanceled())
+                                    .collect(Collectors.toList());
                             editor.setDiagnostics(collect);
+
+                            ProgressManager.getInstance()
+                                    .runLater(() -> editor.setAnalyzing(false), 300);
                         }
                     });
                 } catch (Throwable e) {
@@ -146,6 +178,8 @@ public class JavaAnalyzer extends JavaCodeAnalyzer {
                         Log.e(TAG, "Unable to get diagnostics", e);
                     }
                     service.close();
+                    ProgressManager.getInstance()
+                            .runLater(() -> editor.setAnalyzing(false));
                 }
             }
         }
@@ -167,78 +201,58 @@ public class JavaAnalyzer extends JavaCodeAnalyzer {
                 TreePath treePath = trees.getPath(task.root(), tree);
                 String code = jcDiagnostic.getCode();
 
-                TreePath modifiedPath = null;
+                long start = diagnostic.getStartPosition();
+                long end = diagnostic.getEndPosition();
                 switch (code) {
                     case ErrorCodes.MISSING_RETURN_STATEMENT:
-                        modifiedPath = TreeUtil.findParentOfType(treePath, MethodTree.class);
+                        TreePath block = TreeUtil.findParentOfType(treePath, BlockTree.class);
+                        if (block != null) {
+                            // show error span only at the end parenthesis
+                            end = positions.getEndPosition(task.root(), block.getLeaf()) + 1;
+                            start = end - 2;
+                        }
                         break;
-                    case ErrorCodes.DOES_NOT_OVERRIDE_ABSTRACT:
-                        modifiedPath = TreeUtil.findParentOfType(treePath, ClassTree.class);
+                    case ErrorCodes.DEPRECATED:
+                        if (treePath.getLeaf()
+                                    .getKind() == Tree.Kind.METHOD) {
+                            MethodTree methodTree = (MethodTree) treePath.getLeaf();
+                            if (methodTree.getBody() != null) {
+                                start = positions.getStartPosition(task.root(), methodTree);
+                                end = positions.getStartPosition(task.root(), methodTree.getBody());
+                            }
+                        }
                         break;
                 }
 
-                if (modifiedPath != null) {
-                    setDiagnosticPosition(wrapped, positions, modifiedPath.getCompilationUnit(), modifiedPath.getLeaf());
-                }
+                wrapped.setStartPosition(start);
+                wrapped.setEndPosition(end);
             }
         }
         return wrapped;
     }
 
-    private void setDiagnosticPosition(DiagnosticWrapper wrapped,
-                                       SourcePositions positions,
-                                       CompilationUnitTree root, Tree tree) {
-        long startPosition = positions.getStartPosition(root, tree);
-        long endPosition = getEndPosition(positions, root, tree);
-        wrapped.setStartPosition(startPosition);
-        wrapped.setEndPosition(endPosition);
-    }
+    @Override
+    protected Styles analyze(StringBuilder text, Delegate<Object> delegate) {
+        Styles styles = new Styles();
+        MappedSpans.Builder colors = new MappedSpans.Builder();
 
-    private long getStartPosition(SourcePositions positions, CompilationUnitTree root, Tree tree) {
-        return positions.getStartPosition(root, tree);
-    }
-
-    private long getEndPosition(SourcePositions positions, CompilationUnitTree root, Tree tree) {
-        if (tree instanceof MethodTree) {
-            BlockTree body = ((MethodTree) tree).getBody();
-            if (body != null) {
-                return positions.getStartPosition(root, body);
-            }
-        } else if (tree instanceof ClassTree) {
-            List<? extends Tree> implementsClause = ((ClassTree) tree).getImplementsClause();
-            if (implementsClause != null) {
-                Tree last = implementsClause.get(implementsClause.size() - 1);
-                return positions.getEndPosition(root, last);
-            }
-            Tree extendsClause = ((ClassTree) tree).getExtendsClause();
-            if (extendsClause != null) {
-                return positions.getEndPosition(root, extendsClause);
-            }
-        }
-        return positions.getEndPosition(root, tree);
-    }
-
-    public void analyze(CharSequence content, TextAnalyzeResult colors,
-                        TextAnalyzer.AnalyzeThread.Delegate delegate) {
-        CodeEditor editor = mEditorReference.get();
+        Editor editor = mEditorReference.get();
         if (editor == null) {
-            return;
+            return styles;
         }
-        StringBuilder text = content instanceof StringBuilder ? (StringBuilder) content :
-                new StringBuilder(content);
         JavaTextTokenizer tokenizer = new JavaTextTokenizer(text);
         tokenizer.setCalculateLineColumn(false);
         Tokens token, previous = Tokens.UNKNOWN;
         int line = 0, column = 0;
         LineNumberCalculator helper = new LineNumberCalculator(text);
 
-        Stack<BlockLine> stack = new Stack<>();
-        List<NavigationItem> labels = new ArrayList<>();
+        Stack<CodeBlock> stack = new Stack<>();
         int maxSwitch = 1, currSwitch = 0;
 
         boolean first = true;
 
-        while (delegate.shouldAnalyze()) {
+        while (!delegate.isCancelled()) {
+            ProgressManager.checkCanceled();
             try {
                 // directNextToken() does not skip any token
                 token = tokenizer.directNextToken();
@@ -364,7 +378,7 @@ public class JavaAnalyzer extends JavaCodeAnalyzer {
                         currSwitch = 0;
                     }
                     currSwitch++;
-                    BlockLine block = colors.obtainNewBlock();
+                    CodeBlock block = styles.obtainNewBlock();
                     block.startLine = line;
                     block.startColumn = column;
                     stack.push(block);
@@ -373,11 +387,11 @@ public class JavaAnalyzer extends JavaCodeAnalyzer {
                 case RBRACE: {
                     colors.addIfNeeded(line, column, EditorColorScheme.OPERATOR);
                     if (!stack.isEmpty()) {
-                        BlockLine block = stack.pop();
+                        CodeBlock block = stack.pop();
                         block.endLine = line;
                         block.endColumn = column;
                         if (block.startLine != block.endLine) {
-                            colors.addBlockLine(block);
+                            styles.addCodeBlock(block);
                         }
                     }
                     break;
@@ -409,9 +423,51 @@ public class JavaAnalyzer extends JavaCodeAnalyzer {
             }
         }
         colors.determine(line);
-        colors.setSuppressSwitch(maxSwitch + 10);
-        colors.setNavigation(labels);
+        styles.setSuppressSwitch(maxSwitch + 10);
+        styles.spans = colors.build();
 
-        HighlightUtil.markDiagnostics(editor, mDiagnostics, colors);
+        if (mShouldAnalyzeInBg) {
+            ProgressManager.checkCanceled();
+            analyzeInBackground(text);
+        }
+        HighlightUtil.markDiagnostics(editor, mDiagnostics, styles);
+        return styles;
+    }
+
+    /**
+     * CodeAssist changed: do not interrupt the thread when destroying this analyzer, as it will
+     * also destroy the cache.
+     */
+    @Override
+    public void destroy() {
+        setToNull("ref");
+        setToNull("extraArguments");
+        setToNull("data");
+
+        Field thread = ReflectionUtil.getDeclaredField(SimpleAnalyzeManager.class, "thread");
+        if (thread != null) {
+            thread.setAccessible(true);
+            try {
+                Thread o = (Thread) thread.get(this);
+                ProgressManager.getInstance().cancelThread(o);
+
+                thread.set(this, null);
+            } catch (Throwable e) {
+                throw new Error(e);
+            }
+        }
+    }
+
+    private void setToNull(String fieldName) {
+        Field declaredField =
+                ReflectionUtil.getDeclaredField(SimpleAnalyzeManager.class, fieldName);
+        if (declaredField != null) {
+            declaredField.setAccessible(true);
+            try {
+                declaredField.set(this, null);
+            } catch (IllegalAccessException e) {
+                throw new Error(e);
+            }
+        }
     }
 }

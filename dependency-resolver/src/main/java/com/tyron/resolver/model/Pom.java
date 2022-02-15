@@ -16,7 +16,10 @@ public class Pom {
     private String versionName;
     private String packaging;
 
+    private boolean userDefined;
+
     private List<Dependency> dependencies;
+    private List<Dependency> excludes;
 
     public Pom() {
 
@@ -69,8 +72,19 @@ public class Pom {
         return dependencies;
     }
 
+    public List<Dependency> getExcludes() {
+        if (excludes == null) {
+            return Collections.emptyList();
+        }
+        return excludes;
+    }
+
     public void setDependencies(List<Dependency> dependencies) {
         this.dependencies = dependencies;
+    }
+
+    public void setExcludes(List<Dependency> excludes) {
+        this.excludes = excludes;
     }
 
     @Override
@@ -96,10 +110,10 @@ public class Pom {
 
     public String getPath() {
         String path = groupId.replace('.', '/');
-        String artifact = artifactId.replace('.', '/');
-        return path + "/" + artifact + "/" + versionName;
+        return path + "/" + artifactId + "/" + versionName;
     }
 
+    @NonNull
     @Override
     public String toString() {
         return getDeclarationString();
@@ -109,7 +123,22 @@ public class Pom {
         return packaging;
     }
 
+    public void setUserDefined(boolean val) {
+        userDefined = val;
+    }
+
+    public boolean isUserDefined() {
+        return userDefined;
+    }
+
     public void setPackaging(String packaging) {
         this.packaging = packaging;
+    }
+
+    public void addExcludes(List<Dependency> excludes) {
+        if (this.excludes == null) {
+            this.excludes = new ArrayList<>();
+        }
+        this.excludes.addAll(excludes);
     }
 }

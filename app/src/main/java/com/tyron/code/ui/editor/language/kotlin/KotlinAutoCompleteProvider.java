@@ -2,49 +2,35 @@ package com.tyron.code.ui.editor.language.kotlin;
 
 import android.content.SharedPreferences;
 
-import androidx.preference.PreferenceManager;
+import androidx.annotation.Nullable;
 
-import com.tyron.code.ui.project.ProjectManager;
 import com.tyron.builder.project.Project;
 import com.tyron.builder.project.api.AndroidModule;
 import com.tyron.builder.project.api.Module;
+import com.tyron.code.ApplicationLoader;
+import com.tyron.code.ui.editor.language.AbstractAutoCompleteProvider;
+import com.tyron.code.ui.project.ProjectManager;
 import com.tyron.common.SharedPreferenceKeys;
 import com.tyron.completion.model.CompletionList;
+import com.tyron.editor.Editor;
 import com.tyron.kotlin_completion.CompletionEngine;
 
-import java.nio.channels.ClosedByInterruptException;
-import java.util.List;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
-import java.util.stream.Collectors;
-
-import io.github.rosemoe.sora.data.CompletionItem;
-import io.github.rosemoe.sora.interfaces.AutoCompleteProvider;
-import io.github.rosemoe.sora.text.TextAnalyzeResult;
-import io.github.rosemoe.sora.widget.CodeEditor;
-
-public class KotlinAutoCompleteProvider implements AutoCompleteProvider {
+public class KotlinAutoCompleteProvider extends AbstractAutoCompleteProvider {
 
     private static final String TAG = KotlinAutoCompleteProvider.class.getSimpleName();
 
-    private final CodeEditor mEditor;
+    private final Editor mEditor;
     private final SharedPreferences mPreferences;
 
 
-    public KotlinAutoCompleteProvider(CodeEditor editor) {
+    public KotlinAutoCompleteProvider(Editor editor) {
         mEditor = editor;
-        mPreferences = PreferenceManager.getDefaultSharedPreferences(editor.getContext());
+        mPreferences = ApplicationLoader.getDefaultPreferences();
     }
 
-    private CompletableFuture<CompletionList> mTask;
-
+    @Nullable
     @Override
-    public List<CompletionItem> getAutoCompleteItems(String prefix, TextAnalyzeResult analyzeResult, int line, int column) throws InterruptedException {
-        if (mTask != null) {
-            mTask.cancel(true);
-            mTask = null;
-        }
-
+    public CompletionList getCompletionList(String prefix, int line, int column) {
         if (!mPreferences.getBoolean(SharedPreferenceKeys.KOTLIN_COMPLETIONS, false)) {
             return null;
         }
@@ -69,31 +55,22 @@ public class KotlinAutoCompleteProvider implements AutoCompleteProvider {
             return null;
         }
 
+        if (mEditor.getCurrentFile() == null) {
+            return null;
+        }
+
         CompletionEngine engine = CompletionEngine.getInstance((AndroidModule) currentModule);
 
         if (engine.isIndexing()) {
             return null;
         }
 
-        try {
-            // waiting for code editor to support async code completions
-            mTask = engine.complete(mEditor.getCurrentFile(), mEditor.getText().toString(), prefix, line, column, mEditor.getCursor().getLeft());
-        } catch (RuntimeException e) {
-            if (e.getCause() instanceof ClosedByInterruptException) {
-                throw new InterruptedException(e.getCause().getMessage());
-            }
-            throw e;
-        }
-
-        if (mTask.isCancelled()) {
-            return null;
-        }
-
-        try {
-            return mTask.get().items.stream().map(CompletionItem::new)
-                    .collect(Collectors.toList());
-        } catch (ExecutionException e) {
-            return null;
-        }
+        // waiting for code editor to support async code completions
+        return engine.complete(mEditor.getCurrentFile(),
+                String.valueOf(mEditor.getContent()),
+                prefix,
+                line,
+                column,
+                mEditor.getCaret().getStart());
     }
 }

@@ -1,25 +1,25 @@
 package com.tyron.resolver;
 
+import android.text.TextUtils;
+
 import com.tyron.resolver.model.Dependency;
 import com.tyron.resolver.model.Pom;
-import com.tyron.resolver.repository.PomRepository;
+import com.tyron.resolver.repository.RepositoryManager;
 
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
+import java.util.Objects;
 
 public class DependencyResolver {
 
-    private final PomRepository repository;
+    private final RepositoryManager repository;
     private final Map<Pom, String> resolvedPoms;
 
     private ResolveListener mListener;
 
-    public DependencyResolver(PomRepository repository) {
+    public DependencyResolver(RepositoryManager repository) {
         this.repository = repository;
         this.resolvedPoms = new HashMap<>();
     }
@@ -42,6 +42,8 @@ public class DependencyResolver {
             }
             Pom pom = repository.getPom(dependency.toString());
             if (pom != null) {
+                pom.setExcludes(dependency.getExcludes());
+                pom.setUserDefined(true);
                 poms.add(pom);
             } else {
                 if (mListener != null) {
@@ -65,16 +67,20 @@ public class DependencyResolver {
 
     private void resolve(Pom pom) {
         if (resolvedPoms.containsKey(pom)) {
-            String resolvedVersion = resolvedPoms.get(pom);
-            String thisVersion = pom.getVersionName();
-            int result = getHigherVersion(resolvedVersion, thisVersion);
-            if (result == 0) {
-                return;
-            }
-            if (result > 0) {
-                return;
-            } else {
+            if (pom.isUserDefined()) {
                 resolvedPoms.remove(pom);
+            } else {
+                String resolvedVersion = resolvedPoms.get(pom);
+                String thisVersion = pom.getVersionName();
+                int result = getHigherVersion(resolvedVersion, thisVersion);
+                if (result == 0) {
+                    return;
+                }
+                if (result > 0) {
+                    return;
+                } else {
+                    resolvedPoms.remove(pom);
+                }
             }
         }
 
@@ -82,8 +88,27 @@ public class DependencyResolver {
             mListener.onResolve("Resolving " + pom);
         }
 
+        List<Dependency> excludes = pom.getExcludes();
+
         for (Dependency dependency : pom.getDependencies()) {
             if ("test".equals(dependency.getScope())) {
+                continue;
+            }
+
+            boolean excluded = excludes.stream().filter(Objects::nonNull).anyMatch(ex -> {
+                if (!ex.getGroupId().equals(dependency.getGroupId())) {
+                    return false;
+                }
+                if (!ex.getArtifactId().equals(dependency.getArtifactId())) {
+                    return false;
+                }
+                if (TextUtils.isEmpty(ex.getVersionName())) {
+                    return true;
+                }
+                return ex.getVersionName().equals(dependency.getVersionName());
+            });
+
+            if (excluded) {
                 continue;
             }
 
@@ -95,6 +120,7 @@ public class DependencyResolver {
                 continue;
             }
             if (!resolvedPom.equals(pom)) {
+                resolvedPom.addExcludes(excludes);
                 resolve(resolvedPom);
             }
         }

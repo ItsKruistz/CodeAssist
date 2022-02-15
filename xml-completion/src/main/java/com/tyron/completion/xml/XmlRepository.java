@@ -27,6 +27,7 @@ import com.tyron.common.util.Decompress;
 import com.tyron.completion.xml.model.AttributeInfo;
 import com.tyron.completion.xml.model.DeclareStyleable;
 import com.tyron.completion.xml.model.Format;
+import com.tyron.completion.xml.repository.ResourceRepository;
 import com.tyron.completion.xml.util.StyleUtils;
 
 import org.apache.bcel.Repository;
@@ -38,6 +39,7 @@ import org.xmlpull.v1.XmlPullParserFactory;
 import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
+import java.io.Reader;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -46,19 +48,24 @@ import java.util.TreeMap;
 import java.util.TreeSet;
 
 public class XmlRepository {
-
-    private File mAttrsFile;
     private final Map<String, DeclareStyleable> mDeclareStyleables = new TreeMap<>();
     private final Map<String, DeclareStyleable> mManifestAttrs = new TreeMap<>();
     private final Map<String, AttributeInfo> mExtraAttributes = new TreeMap<>();
     private final Map<String, JavaClass> mJavaViewClasses = new TreeMap<>();
 
     private boolean mInitialized = false;
+    private ResourceRepository mRepository;
 
+    public XmlRepository() {
+
+    }
+
+    @Deprecated
     public Map<String, DeclareStyleable> getManifestAttrs() {
         return mManifestAttrs;
     }
 
+    @Deprecated
     public Map<String, DeclareStyleable> getDeclareStyleables() {
         return mDeclareStyleables;
     }
@@ -67,64 +74,51 @@ public class XmlRepository {
         return mJavaViewClasses;
     }
 
+    @Deprecated
     public AttributeInfo getExtraAttribute(String name) {
         return mExtraAttributes.get(name);
     }
 
-    public void initialize(AndroidModule module) {
+    public void initialize(AndroidModule module) throws IOException {
         if (mInitialized) {
             return;
         }
-        mAttrsFile = getOrExtractFiles();
+        BytecodeScanner.scanBootstrapIfNeeded();
+
+        mRepository = new ResourceRepository(module);
+        mRepository.initialize();
 
         for (File library : module.getLibraries()) {
             File parent = library.getParentFile();
             if (parent == null) {
                 continue;
             }
-            File valuesDir = new File(parent, "res/values");
-            File[] children = valuesDir.listFiles(c -> c.getName().endsWith(".xml"));
-            if (children != null) {
-                for (File child : children) {
-                    try {
-                        Map<String, DeclareStyleable> app = parse(child, "app");
-                        mDeclareStyleables.putAll(app);
-                    } catch (XmlPullParserException | IOException e) {
-                        e.printStackTrace();
-                    }
-                }
-            }
-
             File classesFile = new File(parent, "classes.jar");
             if (classesFile.exists()) {
                 try {
-                    List<JavaClass> scan =
-                            BytecodeScanner.scan(classesFile);
-                    for (JavaClass javaClass : scan) {
-                        StyleUtils.putStyles(javaClass);
-                        mJavaViewClasses.put(javaClass.getClassName(), javaClass);
-                    }
-                } catch (IOException e) {
-                    e.printStackTrace();
+                    BytecodeScanner.loadJar(classesFile);
+                } catch (IOException ignored) {
+
                 }
             }
         }
 
-        try {
-            Map<String, DeclareStyleable> android = parse(mAttrsFile, "android");
-            mDeclareStyleables.putAll(android);
-
-            File manifestAttrsFile = new File(mAttrsFile.getParentFile(), "attrs_manifest.xml");
-            if (manifestAttrsFile.exists()) {
-                Map<String, DeclareStyleable> android1 = parse(manifestAttrsFile, "android");
-                mManifestAttrs.putAll(android1);
+        for (File library : module.getLibraries()) {
+            try {
+                List<JavaClass> scan =
+                        BytecodeScanner.scan(library);
+                for (JavaClass javaClass : scan) {
+                    StyleUtils.putStyles(javaClass);
+                    mJavaViewClasses.put(javaClass.getClassName(), javaClass);
+                }
+            } catch (IOException e) {
+                e.printStackTrace();
             }
-
-        } catch (XmlPullParserException | IOException e) {
-            e.printStackTrace();
         }
 
         addFrameworkViews();
+
+        Repository.clearCache();
 
         mInitialized = true;
     }
@@ -164,11 +158,11 @@ public class XmlRepository {
         }
     }
 
-
-    private Map<String, DeclareStyleable> parse(File file, String namespace) throws XmlPullParserException, IOException {
+    private Map<String, DeclareStyleable> parse(Reader reader, String namespace) throws XmlPullParserException, IOException {
         XmlPullParserFactory factory = XmlPullParserFactory.newInstance();
         XmlPullParser parser = factory.newPullParser();
-        parser.setInput(new FileReader(file));
+
+        parser.setInput(reader);
 
         Map<String, DeclareStyleable> declareStyleables = new TreeMap<>();
 
@@ -193,6 +187,12 @@ public class XmlRepository {
         }
 
         return declareStyleables;
+    }
+
+    private Map<String, DeclareStyleable> parse(File file, String namespace) throws XmlPullParserException, IOException {
+        try (FileReader reader = new FileReader(file)) {
+            return parse(reader, namespace);
+        }
     }
 
     private DeclareStyleable parseDeclareStyleable(XmlPullParser parser, String namespace) throws IOException,
@@ -304,7 +304,7 @@ public class XmlRepository {
         }
     }
 
-    private static File getOrExtractFiles() {
+    public static File getOrExtractFiles() {
         File filesDir = ApplicationProvider.getApplicationContext().getFilesDir();
         File check = new File(filesDir,
                 "sources/android-31/data/res/values/attrs.xml");
@@ -316,5 +316,9 @@ public class XmlRepository {
                 "android-xml.zip",
                 dest.getAbsolutePath());
         return check;
+    }
+
+    public ResourceRepository getRepository() {
+        return mRepository;
     }
 }

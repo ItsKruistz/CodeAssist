@@ -1,5 +1,6 @@
 package com.tyron.code.ui.file.tree;
 
+import android.annotation.SuppressLint;
 import android.os.Bundle;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -9,6 +10,7 @@ import android.widget.PopupMenu;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import androidx.appcompat.widget.ThemeUtils;
 import androidx.fragment.app.Fragment;
 import androidx.lifecycle.ViewModelProvider;
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
@@ -17,8 +19,11 @@ import com.tyron.actions.ActionManager;
 import com.tyron.actions.ActionPlaces;
 import com.tyron.actions.CommonDataKeys;
 import com.tyron.actions.DataContext;
-import com.tyron.code.ui.component.tree.TreeNode;
-import com.tyron.code.ui.component.tree.TreeView;
+import com.tyron.code.R;
+import com.tyron.code.util.UiUtilsKt;
+import com.tyron.completion.progress.ProgressManager;
+import com.tyron.ui.treeview.TreeNode;
+import com.tyron.ui.treeview.TreeView;
 import com.tyron.code.ui.editor.impl.FileEditorManagerImpl;
 import com.tyron.code.ui.file.CommonFileKeys;
 import com.tyron.code.ui.file.FileViewModel;
@@ -59,14 +64,15 @@ public class TreeFileManagerFragment extends Fragment {
         mFileViewModel = new ViewModelProvider(requireActivity()).get(FileViewModel.class);
     }
 
+    @SuppressLint("RestrictedApi")
     @Nullable
     @Override
     public View onCreateView(@NonNull LayoutInflater inflater, @Nullable ViewGroup container, @Nullable Bundle savedInstanceState) {
         FrameLayout root = new FrameLayout(requireContext());
-        root.setBackgroundColor(0xff212121);
         root.setLayoutParams(
                 new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT,
                         FrameLayout.LayoutParams.MATCH_PARENT));
+        UiUtilsKt.addSystemWindowInsetToPadding(root, false, true, false, true);
 
         treeView = new TreeView<>(
                 requireContext(), TreeNode.root(Collections.emptyList()));
@@ -76,7 +82,7 @@ public class TreeFileManagerFragment extends Fragment {
         SwipeRefreshLayout refreshLayout = new SwipeRefreshLayout(requireContext());
         refreshLayout.addView(root);
         refreshLayout.setOnRefreshListener(() -> {
-            Executors.newSingleThreadExecutor().execute(() -> {
+            ProgressManager.getInstance().runNonCancelableAsync(() -> {
                 if (!treeView.getAllNodes().isEmpty()) {
                     TreeNode<TreeFile> node = treeView.getAllNodes().get(0);
                     TreeUtil.updateNode(node);
@@ -100,9 +106,7 @@ public class TreeFileManagerFragment extends Fragment {
             public void onNodeToggled(TreeNode<TreeFile> treeNode, boolean expanded) {
                 if (treeNode.isLeaf()) {
                     if (treeNode.getValue().getFile().isFile()) {
-                        FileEditorManagerImpl.getInstance().openFile(requireContext(), treeNode.getValue().getFile(), fileEditor -> {
-                            mMainViewModel.openFile(fileEditor);
-                        });
+                        FileEditorManagerImpl.getInstance().openFile(requireContext(), treeNode.getValue().getFile(), true);
                     }
                 }
             }

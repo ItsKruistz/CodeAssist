@@ -1,8 +1,13 @@
 package com.tyron.completion.java.util;
 
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
+
 import com.tyron.builder.model.DiagnosticWrapper;
 import com.tyron.completion.java.compiler.CompileTask;
 import com.tyron.completion.java.action.FindMethodDeclarationAt;
+import com.tyron.editor.CharPosition;
+import com.tyron.editor.Editor;
 
 import org.openjdk.javax.lang.model.element.ExecutableElement;
 import org.openjdk.javax.lang.model.element.TypeElement;
@@ -17,6 +22,7 @@ import org.openjdk.source.util.TreePath;
 import org.openjdk.source.util.Trees;
 import org.openjdk.tools.javac.api.ClientCodeWrapper;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -25,6 +31,25 @@ public class DiagnosticUtil {
 
     private static final Pattern UNREPORTED_EXCEPTION =
             Pattern.compile("unreported exception (" + "(\\w+\\.)*\\w+)");
+
+    public static void setLineAndColumn(DiagnosticWrapper diagnostic, Editor editor) {
+        try {
+            if (diagnostic.getStartLine() <= -1 && diagnostic.getStartPosition() > 0) {
+                CharPosition start = editor.getCharPosition(((int) diagnostic.getStartPosition()));
+                diagnostic.setStartLine(start.getLine() + 1);
+                diagnostic.setStartColumn(start.getColumn());
+                diagnostic.setLineNumber(start.getLine() + 1);
+                diagnostic.setColumnNumber(start.getColumn());
+            }
+            if (diagnostic.getEndLine() <= -1 && diagnostic.getEndPosition() > 0) {
+                CharPosition end = editor.getCharPosition(((int) diagnostic.getEndPosition()));
+                diagnostic.setEndLine(end.getLine() + 1);
+                diagnostic.setEndColumn(end.getColumn());
+            }
+        } catch (IndexOutOfBoundsException ignored) {
+            // unknown index, dont display line number
+        }
+    }
 
     public static class MethodPtr {
         public String className, methodName;
@@ -45,6 +70,18 @@ public class DiagnosticUtil {
                 erasedParameterTypes[i] = erased.toString();
             }
         }
+
+        @NonNull
+        @Override
+        public String toString() {
+            return "MethodPtr{" +
+                    "className='" + className +
+                    '\'' + ", methodName='" + methodName +
+                    '\'' + ", erasedParameterTypes=" +
+                    Arrays.toString(erasedParameterTypes) +
+                    ", method=" + method +
+                    '}';
+        }
     }
 
     /**
@@ -54,6 +91,7 @@ public class DiagnosticUtil {
      * @param cursor the current cursor position
      * @return null if no diagnostic is found
      */
+    @Nullable
     public static Diagnostic<? extends JavaFileObject> getDiagnostic(CompileTask task, long cursor) {
        return getDiagnostic(task.diagnostics, cursor);
     }
@@ -67,7 +105,11 @@ public class DiagnosticUtil {
         return null;
     }
 
+    @Nullable
     public static DiagnosticWrapper getDiagnosticWrapper(List<DiagnosticWrapper> diagnostics, long cursor) {
+        if (diagnostics == null) {
+            return null;
+        }
         for (DiagnosticWrapper diagnostic : diagnostics) {
             if (diagnostic.getStartPosition() <= cursor && cursor < diagnostic.getEndPosition()) {
                 return diagnostic;
@@ -76,7 +118,11 @@ public class DiagnosticUtil {
         return null;
     }
 
+    @Nullable
     public static DiagnosticWrapper getXmlDiagnosticWrapper(List<DiagnosticWrapper> diagnostics, int line) {
+        if (diagnostics == null) {
+            return null;
+        }
         for (DiagnosticWrapper diagnostic : diagnostics) {
             if (diagnostic.getLineNumber() - 1 == line) {
                 return diagnostic;
@@ -85,6 +131,7 @@ public class DiagnosticUtil {
         return null;
     }
 
+    @Nullable
     public static ClientCodeWrapper.DiagnosticSourceUnwrapper getDiagnosticSourceUnwrapper(Diagnostic<?> diagnostic) {
         if (diagnostic instanceof DiagnosticWrapper) {
             if (((DiagnosticWrapper) diagnostic).getExtra() instanceof ClientCodeWrapper.DiagnosticSourceUnwrapper) {
@@ -97,6 +144,7 @@ public class DiagnosticUtil {
         return null;
     }
 
+    @NonNull
     public static MethodPtr findMethod(CompileTask task, long position) {
         Trees trees = Trees.instance(task.task);
         Tree tree = new FindMethodDeclarationAt(task.task).scan(task.root(), position);
@@ -105,12 +153,16 @@ public class DiagnosticUtil {
         return new MethodPtr(task.task, method);
     }
 
-
+    @NonNull
     public static String extractExceptionName(String message) {
         Matcher matcher = UNREPORTED_EXCEPTION.matcher(message);
         if (!matcher.find()) {
             return "";
         }
-        return matcher.group(1);
+        String group = matcher.group(1);
+        if (group == null) {
+            return "";
+        }
+        return group;
     }
 }

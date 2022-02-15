@@ -4,10 +4,14 @@ import static com.tyron.completion.java.util.ElementUtil.simpleClassName;
 import static com.tyron.completion.java.util.ElementUtil.simpleType;
 import static com.tyron.completion.progress.ProgressManager.checkCanceled;
 
+import com.tyron.completion.DefaultInsertHandler;
 import com.tyron.completion.java.compiler.CompileTask;
+import com.tyron.completion.java.insert.MethodInsertHandler;
+import com.tyron.completion.java.provider.JavaSortCategory;
 import com.tyron.completion.model.CompletionItem;
 import com.tyron.completion.model.DrawableKind;
 
+import org.openjdk.javax.annotation.processing.Completion;
 import org.openjdk.javax.lang.model.element.Element;
 import org.openjdk.javax.lang.model.element.ExecutableElement;
 import org.openjdk.javax.lang.model.type.DeclaredType;
@@ -37,34 +41,28 @@ public class CompletionItemFactory {
     }
 
     public static CompletionItem keyword(String keyword) {
-        CompletionItem item = new CompletionItem();
-        item.label = keyword;
-        item.commitText = keyword;
-        item.cursorOffset = keyword.length();
-        item.detail = "keyword";
-        item.iconKind = DrawableKind.Keyword;
-        return item;
+        CompletionItem completionItem =
+                CompletionItem.create(keyword, keyword, keyword, DrawableKind.Keyword);
+        completionItem.setSortText(JavaSortCategory.KEYWORD.toString());
+        return completionItem;
     }
 
     public static CompletionItem packageItem(String name) {
-        CompletionItem item = new CompletionItem();
-        item.label = name;
-        item.detail = "";
-        item.commitText = name;
-        item.cursorOffset = name.length();
-        item.iconKind = DrawableKind.Package;
-        return item;
+        return CompletionItem.create(name, "", name, DrawableKind.Package);
     }
 
     public static CompletionItem classItem(String className) {
-        CompletionItem item = new CompletionItem();
-        item.label = simpleClassName(className);
-        item.detail = className;
-        item.commitText = item.label;
+        CompletionItem item = CompletionItem.create(simpleClassName(className),
+                className, simpleClassName(className), DrawableKind.Class);
         item.data = className;
-        item.cursorOffset = item.label.length();
         item.action = CompletionItem.Kind.IMPORT;
-        item.iconKind = DrawableKind.Class;
+        item.setSortText(JavaSortCategory.TO_IMPORT.toString());
+        return item;
+    }
+
+    public static CompletionItem importClassItem(String className) {
+        CompletionItem item = classItem(className);
+        item.action = CompletionItem.Kind.NORMAL;;
         return item;
     }
 
@@ -85,6 +83,18 @@ public class CompletionItemFactory {
         item.commitText = element.getSimpleName().toString();
         item.cursorOffset = item.commitText.length();
         item.iconKind = getKind(element);
+        item.setInsertHandler(new DefaultInsertHandler(item));
+        return item;
+    }
+
+    public static CompletionItem item(String element) {
+        CompletionItem item = new CompletionItem();
+        item.label = element;
+        item.detail = "";
+        item.commitText = element;
+        item.cursorOffset = item.commitText.length();
+        item.iconKind = DrawableKind.Snippet;
+        item.setInsertHandler(new DefaultInsertHandler(item));
         return item;
     }
 
@@ -145,6 +155,7 @@ public class CompletionItemFactory {
             item.cursorOffset = item.commitText.length() -
                     ((methodRef || endsWithParen) ? 0 : 1);
         }
+        item.setInsertHandler(new DefaultInsertHandler(item));
         return item;
     }
 
@@ -152,8 +163,7 @@ public class CompletionItemFactory {
                                   boolean methodRef, ExecutableType type) {
         CompletionItem item = new CompletionItem();
         item.label = getMethodLabel(first, type);
-        item.commitText = first.getSimpleName() + ((methodRef || endsWithParen) ? "" :
-                "()");
+        item.commitText = first.getSimpleName().toString();
         item.detail = type != null
                 ? PrintHelper.printType(type.getReturnType())
                 : PrintHelper.printType(first.getReturnType());
@@ -163,6 +173,8 @@ public class CompletionItemFactory {
             item.cursorOffset = item.commitText.length() -
                     ((methodRef || endsWithParen) ? 0 : 1);
         }
+        item.setInsertHandler(new MethodInsertHandler(first, item));
+        item.addFilterText(first.getSimpleName().toString());
         return item;
     }
 
@@ -202,10 +214,11 @@ public class CompletionItemFactory {
 
             CompletionItem item = new CompletionItem();
             item.label = getMethodLabel(element, executableType);
-            item.detail = PrintHelper.printType(element.getReturnType()).toString();
+            item.detail = PrintHelper.printType(element.getReturnType());
             item.commitText = text;
             item.cursorOffset = item.commitText.length();
             item.iconKind = DrawableKind.Method;
+            item.setInsertHandler(new DefaultInsertHandler(item));
             items.add(item);
         }
         return items;

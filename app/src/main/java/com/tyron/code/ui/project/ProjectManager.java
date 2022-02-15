@@ -22,10 +22,12 @@ import com.tyron.completion.java.compiler.CompilerContainer;
 import com.tyron.completion.java.JavaCompilerProvider;
 import com.tyron.completion.java.compiler.JavaCompilerService;
 import com.tyron.completion.java.provider.CompletionEngine;
+import com.tyron.completion.progress.ProgressManager;
 import com.tyron.completion.xml.XmlIndexProvider;
 import com.tyron.completion.xml.XmlRepository;
 
 import org.apache.commons.io.FileUtils;
+import org.eclipse.lemminx.dom.DOMParser;
 
 import java.io.File;
 import java.io.IOException;
@@ -76,7 +78,7 @@ public class ProjectManager {
                             boolean downloadLibs,
                             TaskListener listener,
                             ILogger logger) {
-        Executors.newSingleThreadExecutor().execute(() ->
+        ProgressManager.getInstance().runNonCancelableAsync(() ->
                 doOpenProject(project, downloadLibs, listener, logger));
     }
 
@@ -84,15 +86,30 @@ public class ProjectManager {
                                boolean downloadLibs,
                                TaskListener mListener,
                                ILogger logger) {
-        Module module = project.getMainModule();
+        mCurrentProject = project;
+
+        boolean shouldReturn = false;
+        // Index the project after downloading dependencies so it will get added to classpath
         try {
-            module.open();
-        } catch (IOException e) {
-            mListener.onComplete(project,false, "Unable to open project: " + e.getMessage());
+            mCurrentProject.open();
+        } catch (IOException exception) {
+            logger.warning("Failed to open project: " + exception.getMessage());
+            shouldReturn = true;
+        }
+        mProjectOpenListeners.forEach(it -> it.onProjectOpen(mCurrentProject));
+
+        if (shouldReturn) {
+            mListener.onComplete(project, false, "Failed to open project.");
             return;
         }
 
-        mCurrentProject = project;
+        try {
+            mCurrentProject.index();
+        } catch (IOException exception) {
+            logger.warning("Failed to open project: " + exception.getMessage());
+        }
+
+        Module module = mCurrentProject.getMainModule();
 
         if (module instanceof JavaModule) {
             JavaModule javaModule = (JavaModule) module;
@@ -103,14 +120,6 @@ public class ProjectManager {
             }
         }
 
-        // Index the project after downloading dependencies so it will get added to classpath
-        try {
-            mCurrentProject.open();
-        } catch (IOException exception) {
-            logger.warning("Failed to open project: " + exception.getMessage());
-            return;
-        }
-        mProjectOpenListeners.forEach(it -> it.onProjectOpen(mCurrentProject));
 
         if (module instanceof AndroidModule) {
             mListener.onTaskStarted("Generating resource files.");
@@ -132,13 +141,7 @@ public class ProjectManager {
             try {
                 JavaCompilerProvider provider = CompilerService.getInstance()
                         .getIndex(JavaCompilerProvider.KEY);
-                JavaCompilerService service = provider.get(project, (JavaModule) module);
-                ((JavaModule) module).getJavaFiles().forEach((key, value) -> {
-                    CompilerContainer container = service.compile(value.toPath());
-                    container.run(__ -> {
-
-                    });
-                });
+                provider.get(project, module);
             } catch (Throwable e) {
                 String message = "Failure indexing project.\n" +
                         Throwables.getStackTraceAsString(e);
@@ -153,14 +156,19 @@ public class ProjectManager {
             index.clear();
 
             XmlRepository xmlRepository = index.get(project, module);
-            xmlRepository.initialize((AndroidModule) module);
+            try {
+                xmlRepository.initialize((AndroidModule) module);
+            } catch (IOException e) {
+                // ignored
+            }
         }
 
         mListener.onComplete(project, true, "Index successful");
     }
 
     private void downloadLibraries(JavaModule project, TaskListener listener, ILogger logger) throws IOException {
-        DependencyManager manager = new DependencyManager(ApplicationLoader.applicationContext.getExternalFilesDir("cache"));
+        DependencyManager manager = new DependencyManager(project,
+                ApplicationLoader.applicationContext.getExternalFilesDir("cache"));
         manager.resolve(project, listener, logger);
     }
 

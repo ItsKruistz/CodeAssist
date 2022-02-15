@@ -1,5 +1,7 @@
 package com.tyron.completion.java;
 
+import static com.tyron.completion.progress.ProgressManager.checkCanceled;
+
 import android.util.Log;
 
 import com.tyron.builder.project.Project;
@@ -13,7 +15,6 @@ import com.tyron.completion.model.CachedCompletion;
 import com.tyron.completion.model.CompletionItem;
 import com.tyron.completion.model.CompletionList;
 import com.tyron.completion.progress.ProcessCanceledException;
-import com.tyron.completion.progress.ProgressManager;
 
 import java.io.File;
 import java.util.Comparator;
@@ -40,42 +41,36 @@ public class JavaCompletionProvider extends CompletionProvider {
         if (!(params.getModule() instanceof JavaModule)) {
             return CompletionList.EMPTY;
         }
-        ProgressManager.checkCanceled();
+        checkCanceled();
 
         if (isIncrementalCompletion(mCachedCompletion, params)) {
-            String partial = partialIdentifier(params.getPrefix(),
-                    params.getPrefix().length());
+            String partial = partialIdentifier(params.getPrefix(), params.getPrefix().length());
             CompletionList cachedList = mCachedCompletion.getCompletionList();
-            if (!cachedList.items.isEmpty()) {
-                List<CompletionItem> narrowedList =
-                        cachedList.items.stream().filter(item -> getRatio(item, partial) > 70)
-                                .sorted(Comparator.comparingInt((CompletionItem it) -> getRatio(it, partial)).reversed())
-                                .collect(Collectors.toList());
-                CompletionList completionList = new CompletionList();
-                completionList.items = narrowedList;
-                return completionList;
+            CompletionList copy = CompletionList.copy(cachedList, partial);
+            if (!copy.isIncomplete || !copy.items.isEmpty()) {
+                return copy;
             }
         }
 
-        try {
-            CompletionList complete = complete(params.getProject(),
-                    (JavaModule) params.getModule(), params.getFile(), params.getContents(),
-                    params.getIndex());
-            String newPrefix = params.getPrefix();
-            if (params.getPrefix().contains(".")) {
-                newPrefix = partialIdentifier(params.getPrefix(), params.getPrefix().length());
-            }
-            mCachedCompletion = new CachedCompletion(params.getFile(), params.getLine(),
-                    params.getColumn(), newPrefix, complete);
-            return complete;
-        } catch (ProcessCanceledException e) {
-            mCachedCompletion = null;
+        CompletionList.Builder complete = complete(params.getProject(), (JavaModule) params.getModule(),
+                params.getFile(), params.getContents(), params.getIndex());
+        if (complete == null) {
             return CompletionList.EMPTY;
         }
+        CompletionList list = complete.build();
+
+        String newPrefix = params.getPrefix();
+        if (params.getPrefix().contains(".")) {
+            newPrefix = partialIdentifier(params.getPrefix(), params.getPrefix().length());
+        }
+
+        mCachedCompletion = new CachedCompletion(params.getFile(), params.getLine(),
+                params.getColumn(), newPrefix, list);
+        return list;
     }
 
-    public CompletionList complete(Project project, JavaModule module, File file, String contents
-            , long cursor) {
+    public CompletionList.Builder complete(
+            Project project, JavaModule module, File file, String contents, long cursor) {
         JavaCompilerProvider compilerProvider =
                 CompilerService.getInstance().getIndex(JavaCompilerProvider.KEY);
         JavaCompilerService service = compilerProvider.getCompiler(project, module);
@@ -90,10 +85,8 @@ public class JavaCompletionProvider extends CompletionProvider {
                 Log.e("JavaCompletionProvider", "Unable to get completions", e);
             }
             service.close();
-        } finally {
-            service.close();
         }
-        return CompletionList.EMPTY;
+        return null;
     }
 
     private String partialIdentifier(String contents, int end) {
@@ -106,7 +99,7 @@ public class JavaCompletionProvider extends CompletionProvider {
 
     private int getRatio(CompletionItem item, String partialIdentifier) {
         String label = getLabel(item);
-        return FuzzySearch.partialRatio(label, partialIdentifier);
+        return FuzzySearch.ratio(label, partialIdentifier);
     }
 
     private String getLabel(CompletionItem item) {

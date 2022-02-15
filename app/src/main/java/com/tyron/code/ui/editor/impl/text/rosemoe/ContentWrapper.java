@@ -59,4 +59,29 @@ public class ContentWrapper implements Content {
     public String toString() {
         return mContent.toString();
     }
+
+    @Override
+    public boolean canRedo() {
+        return mContent.canRedo();
+    }
+
+    @Override
+    public void redo() {
+        mContent.redo();
+    }
+
+    @Override
+    public boolean canUndo() {
+        return mContent.canUndo();
+    }
+
+    @Override
+    public void undo() {
+        mContent.undo();
+    }
+
+    @Override
+    public String getLineString(int line) {
+        return mContent.getLineString(line);
+    }
 }

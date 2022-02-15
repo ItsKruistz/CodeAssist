@@ -33,11 +33,13 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.Predicate;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -184,9 +186,8 @@ public class JavaCompilerService implements CompilerProvider {
 
     // TODO: This doesn't list all the public types
     @Override
-    public List<String> publicTopLevelTypes() {
-        List<String> classes = new ArrayList<>();
-        classes.addAll(mCurrentModule.getAllClasses());
+    public Set<String> publicTopLevelTypes() {
+        Set<String> classes = new HashSet<>(mCurrentModule.getAllClasses());
         for (Module module : mProject.getDependencies(mCurrentModule)) {
             if (module instanceof JavaModule) {
                 classes.addAll(((JavaModule) module).getAllClasses());

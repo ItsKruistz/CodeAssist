@@ -3,18 +3,32 @@ package com.tyron.code.ui.editor.impl.text.rosemoe;
 import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.os.Bundle;
+import android.util.Log;
 import android.view.LayoutInflater;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.inputmethod.EditorInfo;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
+import androidx.core.content.ContextCompat;
 import androidx.core.content.res.ResourcesCompat;
+import androidx.core.graphics.Insets;
+import androidx.core.math.MathUtils;
+import androidx.core.os.BundleKt;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowInsetsCompat;
 import androidx.fragment.app.Fragment;
 import androidx.lifecycle.ViewModelProvider;
 import androidx.preference.PreferenceManager;
 
 import com.google.android.material.bottomsheet.BottomSheetBehavior;
+import com.google.android.material.snackbar.Snackbar;
+import com.google.common.util.concurrent.AsyncCallable;
+import com.google.common.util.concurrent.FutureCallback;
+import com.google.common.util.concurrent.Futures;
+import com.google.common.util.concurrent.ListenableFuture;
 import com.tyron.actions.ActionManager;
 import com.tyron.actions.ActionPlaces;
 import com.tyron.actions.CommonDataKeys;
@@ -26,20 +40,31 @@ import com.tyron.builder.compiler.manifest.xml.XmlPrettyPrinter;
 import com.tyron.builder.log.LogViewModel;
 import com.tyron.builder.model.DiagnosticWrapper;
 import com.tyron.builder.project.Project;
+import com.tyron.builder.project.api.FileManager;
 import com.tyron.builder.project.api.JavaModule;
 import com.tyron.builder.project.api.Module;
+import com.tyron.builder.project.listener.FileListener;
 import com.tyron.code.ApplicationLoader;
 import com.tyron.code.R;
+import com.tyron.code.ui.editor.CodeAssistCompletionAdapter;
+import com.tyron.code.ui.editor.CodeAssistCompletionLayout;
+import com.tyron.code.ui.editor.EditorViewModel;
 import com.tyron.code.ui.editor.Savable;
+import com.tyron.code.ui.editor.impl.FileEditorManagerImpl;
 import com.tyron.code.ui.editor.language.LanguageManager;
 import com.tyron.code.ui.editor.language.java.JavaLanguage;
+import com.tyron.code.ui.editor.language.kotlin.KotlinLanguage;
 import com.tyron.code.ui.editor.language.xml.LanguageXML;
+import com.tyron.code.ui.editor.scheme.CodeAssistColorScheme;
+import com.tyron.code.ui.editor.scheme.CompiledEditorScheme;
 import com.tyron.code.ui.editor.shortcuts.ShortcutAction;
 import com.tyron.code.ui.editor.shortcuts.ShortcutItem;
 import com.tyron.code.ui.layoutEditor.LayoutEditorFragment;
 import com.tyron.code.ui.main.MainViewModel;
 import com.tyron.code.ui.project.ProjectManager;
+import com.tyron.code.ui.settings.EditorSettingsFragment;
 import com.tyron.common.SharedPreferenceKeys;
+import com.tyron.common.util.AndroidUtilities;
 import com.tyron.completion.index.CompilerService;
 import com.tyron.completion.java.JavaCompilerProvider;
 import com.tyron.completion.java.compiler.JavaCompilerService;
@@ -51,10 +76,16 @@ import com.tyron.completion.java.provider.CompletionEngine;
 import com.tyron.completion.java.rewrite.AddImport;
 import com.tyron.completion.java.util.ActionUtil;
 import com.tyron.completion.java.util.DiagnosticUtil;
+import com.tyron.completion.java.util.JavaDataContextUtil;
 import com.tyron.completion.model.CompletionItem;
 import com.tyron.completion.model.TextEdit;
+import com.tyron.completion.progress.ProgressManager;
+import com.tyron.editor.CharPosition;
+import com.tyron.editor.Editor;
+import com.tyron.fileeditor.api.FileEditorManager;
 
 import org.apache.commons.io.FileUtils;
+import org.openjdk.com.sun.org.apache.xpath.internal.operations.Mod;
 import org.openjdk.source.util.TreePath;
 
 import java.io.File;
@@ -62,27 +93,47 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 
-import io.github.rosemoe.sora.interfaces.EditorEventListener;
-import io.github.rosemoe.sora.interfaces.EditorLanguage;
-import io.github.rosemoe.sora.text.CharPosition;
+import io.github.rosemoe.sora.event.ContentChangeEvent;
+import io.github.rosemoe.sora.event.EventReceiver;
+import io.github.rosemoe.sora.event.LongPressEvent;
+import io.github.rosemoe.sora.event.Unsubscribe;
+import io.github.rosemoe.sora.lang.Language;
+import io.github.rosemoe.sora.text.Content;
 import io.github.rosemoe.sora.text.Cursor;
 import io.github.rosemoe.sora.widget.CodeEditor;
+import io.github.rosemoe.sora.widget.DirectAccessProps;
+import io.github.rosemoe.sora.widget.component.DefaultCompletionLayout;
+import io.github.rosemoe.sora.widget.component.EditorAutoCompletion;
+import io.github.rosemoe.sora.widget.schemes.EditorColorScheme;
 import io.github.rosemoe.sora.widget.schemes.SchemeDarcula;
+import io.github.rosemoe.sora2.text.EditorUtil;
+import kotlin.Pair;
 
 @SuppressWarnings("FieldCanBeLocal")
 public class CodeEditorFragment extends Fragment implements Savable,
-        SharedPreferences.OnSharedPreferenceChangeListener {
+        SharedPreferences.OnSharedPreferenceChangeListener, FileListener,
+        ProjectManager.OnProjectOpenListener {
+
+    private static final String NO_PROJECT_OPEN_STRING = "Cannot read file: No project is currently opened. The changes will not be saved.";
+
+    private static final String EDITOR_LEFT_LINE_KEY = "line";
+    private static final String EDITOR_LEFT_COLUMN_KEY = "column";
+    private static final String EDITOR_RIGHT_LINE_KEY = "rightLine";
+    private static final String EDITOR_RIGHT_COLUMN_KEY = "rightColumn";
 
     private CodeEditorView mEditor;
-    private CodeEditorEventListener mEditorEventListener;
 
-    private EditorLanguage mLanguage;
+    private Language mLanguage;
     private File mCurrentFile = new File("");
     private MainViewModel mMainViewModel;
     private SharedPreferences mPreferences;
 
+    private Bundle mSavedInstanceState;
+
     private boolean mCanSave;
+    private boolean mReading;
 
     public static CodeEditorFragment newInstance(File file) {
         CodeEditorFragment fragment = new CodeEditorFragment();
@@ -98,17 +149,38 @@ public class CodeEditorFragment extends Fragment implements Savable,
 
         mCurrentFile = new File(requireArguments().getString("path", ""));
         mMainViewModel = new ViewModelProvider(requireActivity()).get(MainViewModel.class);
+
+        Thread.UncaughtExceptionHandler previousHandler =
+                Thread.getDefaultUncaughtExceptionHandler();
+        Thread.setDefaultUncaughtExceptionHandler((thread, throwable) -> {
+            Log.d("Uncaught exception handler", "Saving " + mCurrentFile + " before crashing.");
+            save(true);
+            if (previousHandler != null) {
+                previousHandler.uncaughtException(thread, throwable);
+            }
+        });
+
+        mSavedInstanceState = savedInstanceState;
     }
 
     @Override
     public void onSaveInstanceState(@NonNull Bundle outState) {
         super.onSaveInstanceState(outState);
 
-        if (mCanSave) {
+        if (mCanSave && !mReading) {
             if (ProjectManager.getInstance().getCurrentProject() != null) {
-                ProjectManager.getInstance().getCurrentProject().getModule(mCurrentFile).getFileManager().setSnapshotContent(mCurrentFile, mEditor.getText().toString());
+                ProjectManager.getInstance().getCurrentProject()
+                        .getModule(mCurrentFile)
+                        .getFileManager()
+                        .setSnapshotContent(mCurrentFile, mEditor.getText().toString(), false);
             }
         }
+
+        Cursor cursor = mEditor.getCursor();
+        outState.putInt(EDITOR_LEFT_LINE_KEY, cursor.getLeftLine());
+        outState.putInt(EDITOR_LEFT_COLUMN_KEY, cursor.getLeftColumn());
+        outState.putInt(EDITOR_RIGHT_LINE_KEY, cursor.getRightLine());
+        outState.putInt(EDITOR_RIGHT_COLUMN_KEY, cursor.getRightColumn());
     }
 
     @Override
@@ -116,44 +188,17 @@ public class CodeEditorFragment extends Fragment implements Savable,
         super.onResume();
 
         if (!CompletionEngine.isIndexing()) {
-            mEditor.analyze();
+            analyze();
         }
 
         if (BottomSheetBehavior.STATE_HIDDEN == mMainViewModel.getBottomSheetState().getValue()) {
             mMainViewModel.setBottomSheetState(BottomSheetBehavior.STATE_COLLAPSED);
         }
-
-        Project currentProject = ProjectManager.getInstance().getCurrentProject();
-        if (currentProject != null) {
-            Module module = currentProject.getModule(mCurrentFile);
-            Optional<CharSequence> fileContent =
-                    module.getFileManager().getFileContent(mCurrentFile);
-            if (fileContent.isPresent()) {
-                int line = mEditor.getCursor().getLeftLine();
-                int column = mEditor.getCursor().getLeftColumn();
-
-                int targetX = mEditor.getOffsetX();
-                int targetY = mEditor.getOffsetY();
-
-                mEditor.setText(fileContent.get());
-
-                mEditor.setSelection(line, column, false);
-
-                mEditor.getScroller().startScroll(mEditor.getOffsetX(), mEditor.getOffsetY(),
-                        targetX - mEditor.getOffsetX(), targetY - mEditor.getOffsetY(), 0);
-            }
-        }
     }
 
 
     public void hideEditorWindows() {
-        mEditor.getTextActionPresenter().onExit();
         mEditor.hideAutoCompleteWindow();
-    }
-
-    @Override
-    public void onStart() {
-        super.onStart();
     }
 
     @Override
@@ -164,29 +209,87 @@ public class CodeEditorFragment extends Fragment implements Savable,
         View root = inflater.inflate(R.layout.code_editor_fragment, container, false);
 
         mEditor = root.findViewById(R.id.code_editor);
-        mEditor.setEditorLanguage(mLanguage = LanguageManager.getInstance().get(mEditor,
-                mCurrentFile));
-        mEditor.setColorScheme(new SchemeDarcula());
-        mEditor.setOverScrollEnabled(false);
+        mEditor.setBackgroundAnalysisEnabled(false);
+        mEditor.setText(NO_PROJECT_OPEN_STRING);
+        configure(mEditor.getProps());
+        mEditor.setEditorLanguage(mLanguage = LanguageManager.getInstance().get(mEditor, mCurrentFile));
         mEditor.setTextSize(Integer.parseInt(mPreferences.getString(SharedPreferenceKeys.FONT_SIZE, "12")));
-        mEditor.setCurrentFile(mCurrentFile);
-        mEditor.setTextActionMode(CodeEditor.TextActionMode.POPUP_WINDOW);
+        mEditor.openFile(mCurrentFile);
+        mEditor.getComponent(EditorAutoCompletion.class).setLayout(new CodeAssistCompletionLayout());
+        mEditor.setAutoCompletionItemAdapter(new CodeAssistCompletionAdapter());
         mEditor.setTypefaceText(ResourcesCompat.getFont(requireContext(),
                 R.font.jetbrains_mono_regular));
         mEditor.setLigatureEnabled(true);
         mEditor.setHighlightCurrentBlock(true);
-        mEditor.setAllowFullscreen(false);
         mEditor.setEdgeEffectColor(Color.TRANSPARENT);
         mEditor.setWordwrap(mPreferences.getBoolean(SharedPreferenceKeys.EDITOR_WORDWRAP, false));
         mEditor.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO);
+
+        View topView = root.findViewById(R.id.top_view);
+        EditorViewModel viewModel = new ViewModelProvider(this).get(EditorViewModel.class);
+        viewModel.getAnalyzeState().observe(getViewLifecycleOwner(), analyzing -> {
+            if (analyzing) {
+                topView.setVisibility(View.VISIBLE);
+            } else {
+                topView.setVisibility(View.GONE);
+            }
+        });
+        mEditor.setViewModel(viewModel);
+
         if (mPreferences.getBoolean(SharedPreferenceKeys.KEYBOARD_ENABLE_SUGGESTIONS, false)) {
             mEditor.setInputType(EditorInfo.TYPE_CLASS_TEXT | EditorInfo.TYPE_TEXT_FLAG_MULTI_LINE);
         } else {
             mEditor.setInputType(EditorInfo.TYPE_TEXT_FLAG_NO_SUGGESTIONS | EditorInfo.TYPE_CLASS_TEXT | EditorInfo.TYPE_TEXT_FLAG_MULTI_LINE | EditorInfo.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD);
         }
         mPreferences.registerOnSharedPreferenceChangeListener(this);
+
+        String schemePath = mPreferences.getString("scheme", null);
+        setScheme(schemePath);
+
         return root;
     }
+
+    private void setScheme(@Nullable String path) {
+        if (path == null) {
+            setDefaultColorScheme();
+            return;
+        }
+
+        File schemeFile = new File(path);
+        if (!schemeFile.exists()) {
+            setDefaultColorScheme();
+            return;
+        }
+
+        ListenableFuture<CodeAssistColorScheme> future =
+                EditorSettingsFragment.getColorScheme(schemeFile);
+        Futures.addCallback(future, new FutureCallback<CodeAssistColorScheme>() {
+            @Override
+            public void onSuccess(@Nullable CodeAssistColorScheme result) {
+                if (result == null) {
+                    setDefaultColorScheme();
+                    return;
+                }
+                mEditor.setColorScheme(result);
+            }
+
+            @Override
+            public void onFailure(@NonNull Throwable t) {
+                setDefaultColorScheme();
+            }
+        }, ContextCompat.getMainExecutor(requireContext()));
+    }
+
+    private void setDefaultColorScheme() {
+        mEditor.setColorScheme(new CompiledEditorScheme(requireContext()));
+    }
+
+    private void configure(DirectAccessProps props) {
+        props.overScrollEnabled = false;
+        props.allowFullscreen = false;
+        props.deleteEmptyLineFast = mPreferences.getBoolean(SharedPreferenceKeys.DELETE_WHITESPACES, false);
+    }
+
 
     @Override
     public void onSharedPreferenceChanged(SharedPreferences pref, String key) {
@@ -207,137 +310,48 @@ public class CodeEditorFragment extends Fragment implements Savable,
             case SharedPreferenceKeys.EDITOR_WORDWRAP:
                 mEditor.setWordwrap(pref.getBoolean(key, false));
                 break;
+            case SharedPreferenceKeys.DELETE_WHITESPACES:
+                mEditor.getProps().deleteEmptyLineFast = pref.getBoolean(SharedPreferenceKeys.DELETE_WHITESPACES, false);
+                break;
+            case SharedPreferenceKeys.SCHEME:
+                setScheme(pref.getString(SharedPreferenceKeys.SCHEME, null));
+                break;
         }
     }
 
     @Override
-    public void onViewCreated(@NonNull View view, Bundle savedInstanceState) {
+    public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
 
-        Module module;
-        Project currentProject = ProjectManager.getInstance().getCurrentProject();
-        if (currentProject != null) {
-            module = currentProject.getModule(mCurrentFile);
+        Project project = ProjectManager.getInstance().getCurrentProject();
+        if (project != null) {
+            readFile(project, savedInstanceState);
         } else {
-            module = null;
+            ProjectManager.getInstance().addOnProjectOpenListener(this);
         }
-        if (mCurrentFile.exists()) {
-            String text;
-            try {
-                text = FileUtils.readFileToString(mCurrentFile, StandardCharsets.UTF_8);
-                mCanSave = true;
-            } catch (IOException e) {
-                text = "File does not exist: " + e.getMessage();
-                mCanSave = false;
-            }
-            if (module != null) {
-                module.getFileManager().openFileForSnapshot(mCurrentFile, text);
-            }
-            mEditor.setText(text);
-        } else {
-            mCanSave = false;
-        }
-
-        mEditorEventListener = new CodeEditorEventListener(module, mCurrentFile);
-        mEditor.setEventListener(mEditorEventListener);
-        mEditor.setOnCompletionItemSelectedListener((window, item) -> {
-            Cursor cursor = mEditor.getCursor();
-            if (!cursor.isSelected()) {
-                window.setCancelShowUp(true);
-
-                int length = window.getLastPrefix().length();
-                if (mLanguage instanceof JavaLanguage) {
-                    if (window.getLastPrefix().contains(".")) {
-                        length -= window.getLastPrefix().lastIndexOf(".") + 1;
-                    }
-                }
-                mEditor.getText().delete(cursor.getLeftLine(), cursor.getLeftColumn() - length,
-                        cursor.getLeftLine(), cursor.getLeftColumn());
-
-                window.setSelectedItem(item.commit);
-                cursor.onCommitMultilineText(item.commit);
-
-                if (item.commit != null && item.cursorOffset != item.commit.length()) {
-                    int delta = (item.commit.length() - item.cursorOffset);
-                    int newSel = Math.max(mEditor.getCursor().getLeft() - delta, 0);
-                    CharPosition charPosition =
-                            mEditor.getCursor().getIndexer().getCharPosition(newSel);
-                    mEditor.setSelection(charPosition.line, charPosition.column);
-                }
-
-                if (item.item == null) {
-                    return;
-                }
-
-                if (item.item.additionalTextEdits != null) {
-                    for (TextEdit edit : item.item.additionalTextEdits) {
-                        window.applyTextEdit(edit);
-                    }
-                }
-
-                if (item.item.action == CompletionItem.Kind.IMPORT) {
-                    if (module instanceof JavaModule) {
-                        Parser parser = Parser.parseFile(currentProject,
-                                mEditor.getCurrentFile().toPath());
-                        ParseTask task = new ParseTask(parser.task, parser.root);
-
-                        boolean samePackage = false;
-                        String packageName = task.root.getPackageName() == null ? "" :
-                                task.root.getPackageName().toString();
-                        //it's either in the same class or it's already imported
-                        if (!item.item.data.contains(".") || packageName.equals(item.item.data.substring(0, item.item.data.lastIndexOf(".")))) {
-                            samePackage = true;
-                        }
-
-                        if (!samePackage && !ActionUtil.hasImport(task.root, item.item.data)) {
-                            AddImport imp = new AddImport(new File(""), item.item.data);
-                            Map<File, TextEdit> edits = imp.getText(task);
-                            TextEdit edit = edits.values().iterator().next();
-                            window.applyTextEdit(edit);
-                        }
-                    }
-                }
-                window.setCancelShowUp(false);
-            }
-            mEditor.postHideCompletionWindow();
-        });
 
         mEditor.setOnCreateContextMenuListener((menu, view1, contextMenuInfo) -> {
             menu.clear();
 
+            Project currentProject = ProjectManager.getInstance().getCurrentProject();
+
             DataContext dataContext = DataContextUtils.getDataContext(view1);
             dataContext.putData(CommonDataKeys.PROJECT, currentProject);
-            dataContext.putData(CommonDataKeys.FILE_EDITOR_KEY,
-                    mMainViewModel.getCurrentFileEditor());
+            dataContext.putData(CommonDataKeys.ACTIVITY, requireActivity());
+            dataContext.putData(CommonDataKeys.FILE_EDITOR_KEY, mMainViewModel.getCurrentFileEditor());
             dataContext.putData(CommonDataKeys.FILE, mCurrentFile);
             dataContext.putData(CommonDataKeys.EDITOR, mEditor);
 
-            if (currentProject != null) {
-                Module currentModule = currentProject.getModule(mCurrentFile);
-                if ((mLanguage instanceof JavaLanguage) && (currentModule instanceof JavaModule)) {
-                    JavaCompilerProvider service =
-                            CompilerService.getInstance().getIndex(JavaCompilerProvider.KEY);
-                    JavaCompilerService compiler = service.getCompiler(currentProject,
-                            (JavaModule) currentModule);
-
-                    compiler.compile(mCurrentFile.toPath()).run(task -> {
-                        if (task != null) {
-                            FindCurrentPath findCurrentPath = new FindCurrentPath(task.task);
-                            TreePath currentPath = findCurrentPath.scan(task.root(),
-                                    (long) mEditor.getCursor().getLeft());
-                            dataContext.putData(CommonJavaContextKeys.CURRENT_PATH, currentPath);
-                        }
-                    });
-                    dataContext.putData(CommonJavaContextKeys.COMPILER, compiler);
-                }
+            if (currentProject != null && mLanguage instanceof JavaLanguage) {
+                JavaDataContextUtil.addEditorKeys(dataContext,
+                        currentProject, mCurrentFile, mEditor.getCursor().getLeft());
             }
 
             DiagnosticWrapper diagnosticWrapper =
                     DiagnosticUtil.getDiagnosticWrapper(mEditor.getDiagnostics(),
                             mEditor.getCursor().getLeft());
             if (diagnosticWrapper == null && mLanguage instanceof LanguageXML) {
-                diagnosticWrapper =
-                        DiagnosticUtil.getXmlDiagnosticWrapper(mEditor.getDiagnostics(),
+                diagnosticWrapper = DiagnosticUtil.getXmlDiagnosticWrapper(mEditor.getDiagnostics(),
                                 mEditor.getCursor().getLeftLine());
             }
             dataContext.putData(CommonDataKeys.DIAGNOSTIC, diagnosticWrapper);
@@ -345,17 +359,40 @@ public class CodeEditorFragment extends Fragment implements Savable,
             ActionManager.getInstance().fillMenu(dataContext, menu, ActionPlaces.EDITOR, true,
                     false);
         });
-
-        mEditor.setOnLongPressListener((start, end, event) -> {
-            save();
-            mEditor.showContextMenu(event.getX(), event.getY());
+        mEditor.subscribeEvent(LongPressEvent.class, (event, unsubscribe) -> {
+            MotionEvent e = event.getCausingEvent();
+            save(false);
+            // wait for the cursor to move
+            ProgressManager.getInstance().runLater(() -> {
+                Cursor cursor = mEditor.getCursor();
+                if (cursor.isSelected()) {
+                    int index = mEditor.getCharIndex(event.getLine(), event.getColumn());
+                    int cursorLeft = cursor.getLeft();
+                    int cursorRight = cursor.getRight();
+                    char c = mEditor.getText().charAt(index);
+                    if (Character.isWhitespace(c)) {
+                        mEditor.setSelection(event.getLine(), event.getColumn());
+                    } else if (index < cursorLeft || index > cursorRight) {
+                        EditorUtil.selectWord(mEditor, event.getLine(), event.getColumn());
+                    }
+                }
+                mEditor.showContextMenu(e.getX(), e.getY());
+            });
+        });
+        mEditor.subscribeEvent(ContentChangeEvent.class, (event, unsubscribe) -> {
+            if (event.getAction() == ContentChangeEvent.ACTION_SET_NEW_TEXT) {
+                return;
+            }
+            updateFile(event.getEditor().getText());
         });
 
         LogViewModel logViewModel =
                 new ViewModelProvider(requireActivity()).get(LogViewModel.class);
-
         mEditor.setDiagnosticsListener(diagnostics -> {
-            logViewModel.updateLogs(LogViewModel.DEBUG, diagnostics);
+            for (DiagnosticWrapper diagnostic : diagnostics) {
+                DiagnosticUtil.setLineAndColumn(diagnostic, mEditor);
+            }
+            ProgressManager.getInstance().runLater(() -> logViewModel.updateLogs(LogViewModel.DEBUG, diagnostics));
         });
 
         getChildFragmentManager().setFragmentResultListener(LayoutEditorFragment.KEY_SAVE,
@@ -370,20 +407,27 @@ public class CodeEditorFragment extends Fragment implements Savable,
     @Override
     public void onDestroyView() {
         super.onDestroyView();
-
-        mEditorEventListener = null;
         mEditor.setEditorLanguage(null);
-        mEditor.setEventListener(null);
-        mEditor.setOnLongPressListener(null);
-        mEditor.setOnCompletionItemSelectedListener(null);
-        mEditor.destroy();
+
+        Project currentProject = ProjectManager.getInstance().getCurrentProject();
+        if (currentProject != null) {
+            Module module = currentProject.getModule(mCurrentFile);
+            if (module != null) {
+                module.getFileManager().removeSnapshotListener(this);
+            }
+        }
+
+        ProjectManager.getInstance().removeOnProjectOpenListener(this);
     }
 
     @Override
     public void onDestroy() {
         super.onDestroy();
-        if (ProjectManager.getInstance().getCurrentProject() != null) {
-            ProjectManager.getInstance().getCurrentProject().getModule(mCurrentFile).getFileManager().closeFileForSnapshot(mCurrentFile);
+        if (ProjectManager.getInstance().getCurrentProject() != null && mCanSave) {
+            ProgressManager.getInstance().runNonCancelableAsync(() ->
+                    ProjectManager.getInstance().getCurrentProject()
+                            .getModule(mCurrentFile).getFileManager()
+                            .closeFileForSnapshot(mCurrentFile));
         }
         mPreferences.unregisterOnSharedPreferenceChangeListener(this);
     }
@@ -394,45 +438,175 @@ public class CodeEditorFragment extends Fragment implements Savable,
 
         hideEditorWindows();
 
-        if (mCanSave) {
+        if (mCanSave && !mReading) {
             if (ProjectManager.getInstance().getCurrentProject() != null) {
-                ProjectManager.getInstance().getCurrentProject().getModule(mCurrentFile).getFileManager().setSnapshotContent(mCurrentFile, mEditor.getText().toString());
+                ProjectManager.getInstance().getCurrentProject()
+                        .getModule(mCurrentFile)
+                        .getFileManager()
+                        .setSnapshotContent(mCurrentFile, mEditor.getText().toString(), false);
             } else {
-                try {
-                    FileUtils.writeStringToFile(mCurrentFile, mEditor.getText().toString(),
-                            StandardCharsets.UTF_8);
-                } catch (IOException e) {
-                    // ignored
+                ProgressManager.getInstance().runNonCancelableAsync(() -> {
+                    try {
+                        FileUtils.writeStringToFile(mCurrentFile, mEditor.getText().toString(),
+                                StandardCharsets.UTF_8);
+                    } catch (IOException e) {
+                        // ignored
+                    }
+                });
+            }
+        }
+    }
+
+    @Override
+    public void onLowMemory() {
+        super.onLowMemory();
+
+        mEditor.setBackgroundAnalysisEnabled(false);
+    }
+
+    @Override
+    public void onSnapshotChanged(File file, CharSequence contents) {
+        if (mCurrentFile.equals(file)) {
+            if (mEditor != null) {
+                if (!mEditor.getText().toString().contentEquals(contents)) {
+                    Cursor cursor = mEditor.getCursor();
+                    int left = cursor.getLeft();
+                    mEditor.setText(contents);
+
+                    if (left > contents.length()) {
+                        left = contents.length();
+                    }
+                    CharPosition position = mEditor.getCharPosition(left);
+                    mEditor.setSelection(position.getLine(), position.getColumn());
                 }
             }
         }
     }
 
     @Override
-    public void save() {
-        if (!mCanSave) {
+    public void save(boolean toDisk) {
+        if (!mCanSave || mReading) {
             return;
         }
-        if (mCurrentFile.exists()) {
-            String oldContents = "";
-            try {
-                oldContents = FileUtils.readFileToString(mCurrentFile, StandardCharsets.UTF_8);
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
-            if (oldContents.equals(mEditor.getText().toString())) {
-                return;
-            }
 
-            try {
-                FileUtils.writeStringToFile(mCurrentFile, mEditor.getText().toString());
-            } catch (IOException e) {
-                // ignored
-            }
+        if (!mCurrentFile.exists()) {
+            return;
+        }
+
+        if (ProjectManager.getInstance().getCurrentProject() != null && !toDisk) {
+            ProjectManager.getInstance().getCurrentProject()
+                    .getModule(mCurrentFile)
+                    .getFileManager()
+                    .setSnapshotContent(mCurrentFile, mEditor.getText().toString(), false);
+        } else {
+            ProgressManager.getInstance().runNonCancelableAsync(() -> {
+                try {
+                    FileUtils.writeStringToFile(mCurrentFile, mEditor.getText().toString(),
+                            StandardCharsets.UTF_8);
+                } catch (IOException e) {
+                    // ignored
+                }
+            });
         }
     }
 
-    public CodeEditor getEditor() {
+    @Override
+    public void onProjectOpen(Project project) {
+        readFile(project, mSavedInstanceState);
+    }
+
+    private ListenableFuture<String> readFile() {
+        return ProgressManager.getInstance().computeNonCancelableAsync(() ->
+                Futures.immediateFuture(FileUtils.readFileToString(mCurrentFile, StandardCharsets.UTF_8)));
+    }
+
+    private void readFile(@NonNull Project currentProject, @Nullable Bundle savedInstanceState) {
+        Module module = currentProject.getModule(mCurrentFile);
+        FileManager fileManager = module.getFileManager();
+        fileManager.addSnapshotListener(this);
+
+        if (fileManager.isOpened(mCurrentFile)) {
+            Optional<CharSequence> contents = fileManager.getFileContent(mCurrentFile);
+            if (contents.isPresent()) {
+                mEditor.setText(contents.get());
+                return;
+            }
+        }
+
+        mReading = true;
+        mEditor.setBackgroundAnalysisEnabled(false);
+        ListenableFuture<String> future = readFile();
+        Futures.addCallback(future, new FutureCallback<String>() {
+            @Override
+            public void onSuccess(@Nullable String result) {
+                mCanSave = true;
+                mReading = false;
+                mEditor.setBackgroundAnalysisEnabled(true);
+                fileManager.openFileForSnapshot(mCurrentFile, result);
+                mEditor.setText(result);
+                mEditor.rerunAnalysis();
+
+                if (savedInstanceState != null) {
+                    restoreState(savedInstanceState);
+                }
+
+                checkCanSave();
+            }
+
+            @Override
+            public void onFailure(Throwable t) {
+                mCanSave = false;
+                mReading = false;
+                checkCanSave();
+            }
+        }, ContextCompat.getMainExecutor(requireContext()));
+    }
+
+    private void checkCanSave() {
+        if (!mCanSave) {
+            Snackbar snackbar = Snackbar.make(mEditor, R.string.editor_error_file,
+                    Snackbar.LENGTH_INDEFINITE).setAction(R.string.menu_close,
+                    v -> FileEditorManagerImpl.getInstance().closeFile(mCurrentFile));
+            ViewGroup snackbarView = (ViewGroup) snackbar.getView();
+            AndroidUtilities.setMargins(snackbarView,
+                    0, 0, 0,50);
+            snackbar.show();
+        }
+    }
+
+    private void showFileConflict() {
+
+    }
+
+    private void restoreState(@NonNull Bundle savedInstanceState) {
+        int leftLine = savedInstanceState.getInt(EDITOR_LEFT_LINE_KEY, 0);
+        int leftColumn = savedInstanceState.getInt(EDITOR_LEFT_COLUMN_KEY, 0);
+        int rightLine = savedInstanceState.getInt(EDITOR_RIGHT_LINE_KEY, 0);
+        int rightColumn = savedInstanceState.getInt(EDITOR_RIGHT_COLUMN_KEY, 0);
+
+        Content text = mEditor.getText();
+        if (leftLine > text.getLineCount() || rightLine > text.getLineCount()) {
+            return;
+        }
+        if (leftLine != rightLine && leftColumn != rightColumn) {
+            mEditor.setSelectionRegion(leftLine, leftColumn, rightLine, rightColumn, true);
+        } else {
+            mEditor.setSelection(leftLine, leftColumn);
+        }
+    }
+
+    private void updateFile(CharSequence contents) {
+        Project project = ProjectManager.getInstance().getCurrentProject();
+        if (project == null) {
+            return;
+        }
+        Module module = project.getModule(mCurrentFile);
+        if (module != null) {
+            module.getFileManager().setSnapshotContent(mCurrentFile, contents.toString(), this);
+        }
+    }
+
+    public Editor getEditor() {
         return mEditor;
     }
 
@@ -478,24 +652,25 @@ public class CodeEditorFragment extends Fragment implements Savable,
      * @param item the item to be performed
      */
     public void performShortcut(ShortcutItem item) {
+        if (mEditor == null) {
+            return;
+        }
         for (ShortcutAction action : item.actions) {
-            if (action.isApplicable(item.kind)) {
-                action.apply(mEditor, item);
-            }
+            action.apply(mEditor, item);
         }
     }
 
     public void format() {
         if (mEditor != null) {
-            if (mEditor.getCursor().isSelected()) {
-                if (mLanguage instanceof JavaLanguage) {
-                    Cursor cursor = mEditor.getCursor();
-                    CharSequence format = mLanguage.format(mEditor.getText(), cursor.getLeft(),
-                            cursor.getRight());
-                    mEditor.setText(format);
-                    return;
-                }
-            }
+//            if (mEditor.getCursor().isSelected()) {
+//                if (mLanguage instanceof JavaLanguage) {
+//                    Cursor cursor = mEditor.getCursor();
+//                    CharSequence format = mLanguage.format(mEditor.getText(), cursor.getLeft(),
+//                            cursor.getRight());
+//                    mEditor.setText(format);
+//                    return;
+//                }
+//            }
             mEditor.formatCodeAsync();
         }
     }
@@ -504,77 +679,8 @@ public class CodeEditorFragment extends Fragment implements Savable,
      * Notifies the editor to analyze and highlight the current text
      */
     public void analyze() {
-        if (mEditor != null) {
-            mEditor.analyze();
-        }
-    }
-
-    @Override
-    public void onLowMemory() {
-        super.onLowMemory();
-
-        mEditor.setBackgroundAnalysisEnabled(false);
-    }
-
-    private static final class CodeEditorEventListener implements EditorEventListener {
-
-        private final Module mModule;
-        private final File mCurrentFile;
-
-        public CodeEditorEventListener(Module module, File currentFile) {
-            mModule = module;
-            mCurrentFile = currentFile;
-        }
-
-        @Override
-        public boolean onRequestFormat(@NonNull CodeEditor editor) {
-            return false;
-        }
-
-        @Override
-        public boolean onFormatFail(@NonNull CodeEditor editor, Throwable cause) {
-            ApplicationLoader.showToast("Unable to format: " + cause.getMessage());
-            return false;
-        }
-
-        @Override
-        public void onFormatSucceed(@NonNull CodeEditor editor) {
-
-        }
-
-        @Override
-        public void onNewTextSet(@NonNull CodeEditor editor) {
-            updateFile(editor.getText().toString());
-        }
-
-        @Override
-        public void afterDelete(@NonNull CodeEditor editor, @NonNull CharSequence content,
-                                int startLine, int startColumn, int endLine, int endColumn,
-                                CharSequence deletedContent) {
-            updateFile(content);
-        }
-
-        @Override
-        public void afterInsert(@NonNull CodeEditor editor, @NonNull CharSequence content,
-                                int startLine, int startColumn, int endLine, int endColumn,
-                                CharSequence insertedContent) {
-            updateFile(content);
-        }
-
-        @Override
-        public void beforeReplace(@NonNull CodeEditor editor, @NonNull CharSequence content) {
-            updateFile(content);
-        }
-
-        @Override
-        public void onSelectionChanged(@NonNull CodeEditor editor, @NonNull Cursor cursor) {
-
-        }
-
-        private void updateFile(CharSequence contents) {
-            if (mModule != null) {
-                mModule.getFileManager().setSnapshotContent(mCurrentFile, contents.toString());
-            }
+        if (mEditor != null && !mReading) {
+            mEditor.rerunAnalysis();
         }
     }
 }
