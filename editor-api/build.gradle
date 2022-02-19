@@ -3,7 +3,13 @@ plugins {
 }
 
 dependencies {
-    implementation project(path: ':build-tools:build-logic')
+    implementation 'org.jetbrains:annotations:23.0.0'
+
+    implementation project(path: ':build-tools:logging')
+    implementation project(path: ':build-tools:project')
+    implementation project(path: ':language-api')
+    implementation project(path: ':common')
+
     testImplementation 'junit:junit:4.+'
 }
 java {

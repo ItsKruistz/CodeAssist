@@ -15,15 +15,11 @@ import android.view.ViewGroup;
 import androidx.activity.OnBackPressedCallback;
 import androidx.annotation.NonNull;
 import androidx.appcompat.widget.Toolbar;
-import androidx.core.graphics.Insets;
 import androidx.core.view.GravityCompat;
-import androidx.core.view.ViewCompat;
-import androidx.core.view.WindowInsetsCompat;
 import androidx.drawerlayout.widget.DrawerLayout;
 import androidx.fragment.app.Fragment;
 import androidx.lifecycle.ViewModelProvider;
 
-import com.google.android.material.appbar.AppBarLayout;
 import com.google.android.material.progressindicator.LinearProgressIndicator;
 import com.google.android.material.transition.MaterialSharedAxis;
 import com.google.gson.Gson;
@@ -36,7 +32,10 @@ import com.tyron.builder.log.ILogger;
 import com.tyron.builder.model.DiagnosticWrapper;
 import com.tyron.builder.project.api.AndroidModule;
 import com.tyron.builder.project.api.Module;
-import com.tyron.code.ui.editor.impl.FileEditorManagerImpl;
+import com.tyron.code.ApplicationLoader;
+import com.tyron.code.ui.file.event.RefreshRootEvent;
+import com.tyron.code.util.UiUtilsKt;
+import com.tyron.common.logging.IdeLog;
 import com.tyron.fileeditor.api.FileEditor;
 import com.tyron.fileeditor.api.FileEditorSavedState;
 import com.tyron.code.ui.project.ProjectManager;
@@ -60,7 +59,12 @@ import java.io.File;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 import java.util.stream.Collectors;
 
 public class MainFragment extends Fragment implements ProjectManager.OnProjectOpenListener {
@@ -70,6 +74,8 @@ public class MainFragment extends Fragment implements ProjectManager.OnProjectOp
     public static final Key<CompileCallback> COMPILE_CALLBACK_KEY = Key.create("compileCallback");
     public static final Key<IndexCallback> INDEX_CALLBACK_KEY = Key.create("indexCallbackKey");
     public static final Key<MainViewModel> MAIN_VIEW_MODEL_KEY = Key.create("mainViewModel");
+
+    private Handler mHandler;
 
     public static MainFragment newInstance(@NonNull String projectPath) {
         Bundle bundle = new Bundle();
@@ -147,6 +153,7 @@ public class MainFragment extends Fragment implements ProjectManager.OnProjectOp
 
         mToolbar = mRoot.findViewById(R.id.toolbar);
         mToolbar.setNavigationIcon(R.drawable.ic_baseline_menu_24);
+        UiUtilsKt.addSystemWindowInsetToPadding(mToolbar, false, true, false, false);
 
         getChildFragmentManager().setFragmentResultListener(REFRESH_TOOLBAR_KEY,
                                                             getViewLifecycleOwner(),
@@ -231,6 +238,31 @@ public class MainFragment extends Fragment implements ProjectManager.OnProjectOp
                         }
                     });
         }
+
+        mHandler = new Handler() {
+            @Override
+            public void publish(LogRecord record) {
+                Level level = record.getLevel();
+                if (Level.WARNING.equals(level)) {
+                    mLogViewModel.w(LogViewModel.IDE, record.getMessage());
+                } else if (Level.SEVERE.equals(level)) {
+                    mLogViewModel.e(LogViewModel.IDE, record.getMessage());
+                } else {
+                    mLogViewModel.d(LogViewModel.IDE, record.getMessage());
+                }
+            }
+
+            @Override
+            public void flush() {
+                mLogViewModel.clear(LogViewModel.IDE);
+            }
+
+            @Override
+            public void close() throws SecurityException {
+                mLogViewModel.clear(LogViewModel.IDE);
+            }
+        };
+        IdeLog.getLogger().addHandler(mHandler);
     }
 
     @Override
@@ -249,6 +281,15 @@ public class MainFragment extends Fragment implements ProjectManager.OnProjectOp
 
         if (mLogReceiver != null) {
             requireActivity().unregisterReceiver(mLogReceiver);
+        }
+    }
+
+    @Override
+    public void onDestroyView() {
+        super.onDestroyView();
+
+        if (mHandler != null) {
+            IdeLog.getLogger().removeHandler(mHandler);
         }
     }
 
@@ -286,12 +327,16 @@ public class MainFragment extends Fragment implements ProjectManager.OnProjectOp
         mMainViewModel.openFile(file);
     }
 
-    public void openProject(Project project) {
+    public void openProject(@NonNull Project project) {
         if (CompletionEngine.isIndexing()) {
             return;
         }
         if (getContext() == null) {
             return;
+        }
+
+        if (project.equals(ProjectManager.getInstance().getCurrentProject())) {
+            saveAll();
         }
 
         mProject = project;
@@ -302,7 +347,8 @@ public class MainFragment extends Fragment implements ProjectManager.OnProjectOp
         mMainViewModel.setIndexing(true);
         CompletionEngine.setIndexing(true);
 
-        mFileViewModel.refreshNode(project.getRootFile());
+        RefreshRootEvent event = new RefreshRootEvent(project.getRootFile());
+        ApplicationLoader.getInstance().getEventManager().dispatchEvent(event);
 
         Intent intent = new Intent(requireContext(), IndexService.class);
         requireActivity().startService(intent);
@@ -317,6 +363,9 @@ public class MainFragment extends Fragment implements ProjectManager.OnProjectOp
         if (CompletionEngine.isIndexing()) {
             return;
         }
+
+        Collection<Module> modules = mProject.getModules();
+        modules.forEach(it -> it.getFileManager().saveContents());
 
         getChildFragmentManager().setFragmentResult(EditorContainerFragment.SAVE_ALL_KEY,
                                                     Bundle.EMPTY);
@@ -343,8 +392,8 @@ public class MainFragment extends Fragment implements ProjectManager.OnProjectOp
             return;
         }
 
-        mServiceConnection.setBuildType(type);
         saveAll();
+        mServiceConnection.setBuildType(type);
 
         mMainViewModel.setCurrentState(getString(R.string.compilation_state_compiling));
         mMainViewModel.setIndexing(true);

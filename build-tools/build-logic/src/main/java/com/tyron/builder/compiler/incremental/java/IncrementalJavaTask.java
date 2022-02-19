@@ -3,7 +3,6 @@ package com.tyron.builder.compiler.incremental.java;
 import androidx.annotation.VisibleForTesting;
 
 import org.openjdk.source.util.JavacTask;
-import org.openjdk.tools.javac.api.JavacTaskImpl;
 import org.openjdk.tools.javac.api.JavacTool;
 import com.tyron.builder.compiler.BuildType;
 import com.tyron.builder.compiler.Task;
@@ -11,10 +10,9 @@ import com.tyron.builder.exception.CompilationFailedException;
 import com.tyron.builder.log.ILogger;
 import com.tyron.builder.model.DiagnosticWrapper;
 import com.tyron.builder.model.ModuleSettings;
-import com.tyron.builder.model.SourceFileObject;
+import com.tyron.builder.project.api.AndroidModule;
 import com.tyron.builder.project.api.JavaModule;
 import com.tyron.builder.project.cache.CacheHolder;
-import com.tyron.common.TestUtil;
 import com.tyron.common.util.Cache;
 
 import org.apache.commons.io.FileUtils;
@@ -70,7 +68,9 @@ public class IncrementalJavaTask extends Task<JavaModule> {
         mClassCache = getModule().getCache(CACHE_KEY, new Cache<>());
 
         mJavaFiles = new ArrayList<>(getModule().getJavaFiles().values());
-
+        if (getModule() instanceof AndroidModule) {
+            mJavaFiles.addAll(((AndroidModule) getModule()).getResourceClasses().values());
+        }
         for (Cache.Key<String> key : new HashSet<>(mClassCache.getKeys())) {
             if (!mJavaFiles.contains(key.file.toFile())) {
                 File file = mClassCache.get(key.file, "class").iterator().next();

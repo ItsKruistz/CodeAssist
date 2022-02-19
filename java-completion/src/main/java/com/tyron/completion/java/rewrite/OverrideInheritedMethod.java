@@ -30,12 +30,14 @@ import org.openjdk.source.util.SourcePositions;
 import org.openjdk.source.util.TreePath;
 import org.openjdk.source.util.Trees;
 
+import java.io.File;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
@@ -72,6 +74,10 @@ public class OverrideInheritedMethod implements JavaRewrite {
 
         List<TextEdit> edits = new ArrayList<>();
         Position insertPoint = insertNearCursor(compiler);
+
+        if (insertPoint == Position.NONE) {
+            return CANCELLED;
+        }
 
         CompilerContainer container = sourceFileObject == null
                 ? compiler.compile(file)
@@ -122,22 +128,27 @@ public class OverrideInheritedMethod implements JavaRewrite {
 
             edits.add(new TextEdit(new Range(insertPoint, insertPoint), text));
 
+            File source = file != null
+                    ? file.toFile()
+                    : Objects.requireNonNull(sourceFileObject).mFile.toFile();
             for (String s : typesToImport) {
                 if (!ActionUtil.hasImport(root, s)) {
-                    JavaRewrite addImport = new AddImport(file.toFile(), s);
+                    JavaRewrite addImport = new AddImport(source, s);
                     Map<Path, TextEdit[]> rewrite = addImport.rewrite(compiler);
-                    TextEdit[] textEdits = rewrite.get(file);
+                    TextEdit[] textEdits = rewrite.get(source.toPath());
                     if (textEdits != null) {
                         Collections.addAll(edits, textEdits);
                     }
                 }
             }
-            return Collections.singletonMap(file, edits.toArray(new TextEdit[0]));
+            return Collections.singletonMap(source.toPath(), edits.toArray(new TextEdit[0]));
         });
     }
 
     private Position insertNearCursor(CompilerProvider compiler) {
-        ParseTask task = compiler.parse(file);
+        ParseTask task = file != null
+                ? compiler.parse(file)
+                : compiler.parse(sourceFileObject);
         ClassTree parent = new FindTypeDeclarationAt(task.task).scan(task.root,
                 (long) insertPosition);
         Position next = nextMember(task, parent);

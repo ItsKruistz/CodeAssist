@@ -8,6 +8,7 @@ import com.tyron.completion.xml.repository.api.ResourceNamespace;
 import com.tyron.completion.xml.repository.api.ResourceReference;
 import com.tyron.completion.xml.repository.api.ResourceValue;
 
+import java.io.File;
 import java.io.IOException;
 import java.util.List;
 import java.util.Set;
@@ -75,6 +76,18 @@ public interface Repository {
     @NonNull
     ResourceNamespace getNamespace();
 
+    /**
+     * Return all the namespaces stored in this repository
+     */
+    @NonNull
+    List<ResourceNamespace> getNamespaces();
+
+    /**
+     * Return all the resource types stored in this repository
+     */
+    @NonNull
+    List<ResourceType> getResourceTypes();
+
     ResourceValue getValue(ResourceReference reference);
 
     default ResourceValue getValue(String name, boolean resolveRefs) {
@@ -84,4 +97,6 @@ public interface Repository {
     ResourceValue getValue(ResourceNamespace namespace, String name, boolean resolveRefs);
 
     void initialize() throws IOException;
+
+    void updateFile(@NonNull File file, @NonNull String contents) throws IOException;
 }

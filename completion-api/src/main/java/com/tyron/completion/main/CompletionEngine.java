@@ -4,11 +4,13 @@ import android.util.Log;
 
 import com.tyron.builder.project.Project;
 import com.tyron.builder.project.api.Module;
+import com.tyron.common.logging.IdeLog;
 import com.tyron.completion.CompletionParameters;
 import com.tyron.completion.CompletionProvider;
 import com.tyron.completion.model.CompletionList;
 import com.tyron.completion.progress.ProcessCanceledException;
 import com.tyron.completion.progress.ProgressManager;
+import com.tyron.editor.Editor;
 
 import java.io.File;
 import java.time.Duration;
@@ -19,12 +21,14 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.logging.Logger;
 
 /**
  * Main entry point for the completions api.
  */
 public class CompletionEngine {
 
+    private final Logger logger = IdeLog.getCurrentLogger(this);
     private static CompletionEngine sInstance = null;
 
     public static CompletionEngine getInstance() {
@@ -56,18 +60,24 @@ public class CompletionEngine {
 
     public CompletionList complete(Project project,
                                    Module module,
+                                   Editor editor,
                                    File file,
                                    String contents,
                                    String prefix,
                                    int line,
                                    int column,
                                    long index) {
+        if (project.isCompiling()) {
+            return CompletionList.EMPTY;
+        }
+
         CompletionList list = new CompletionList();
         list.items = new ArrayList<>();
 
         CompletionParameters parameters = CompletionParameters.builder()
                 .setProject(project)
                 .setModule(module)
+                .setEditor(editor)
                 .setFile(file)
                 .setContents(contents)
                 .setPrefix(prefix)
@@ -77,13 +87,14 @@ public class CompletionEngine {
                 .build();
 
         Instant now = Instant.now();
-        List<CompletionProvider> providers = getCompletionProviders(file);
+        List<CompletionProvider> providers = CompletionProvider.forParameters(parameters);
         for (CompletionProvider provider : providers) {
             CompletionList complete = provider.complete(parameters);
-            list.items.addAll(complete.items);
+            if (complete != null) {
+                list.items.addAll(complete.items);
+            }
         }
-
-        Log.d("CompletionEngine", "Completions took " + Duration.between(now, Instant.now()).toMillis() + " ms");
+        logger.info("Completions took " + Duration.between(now, Instant.now()).toMillis() + " ms");
         return list;
     }
 
