@@ -4,6 +4,7 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
 import com.google.common.io.CharStreams;
+import com.tyron.common.logging.IdeLog;
 import com.tyron.common.util.FileUtilsEx;
 import com.tyron.resolver.model.Pom;
 import com.tyron.resolver.parser.PomParser;
@@ -11,6 +12,7 @@ import com.tyron.resolver.parser.PomParser;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.filefilter.SuffixFileFilter;
 import org.apache.commons.io.filefilter.TrueFileFilter;
+import org.xml.sax.SAXException;
 import org.xmlpull.v1.XmlPullParserException;
 
 import java.io.File;
@@ -19,14 +21,18 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.URL;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
 import java.util.jar.JarFile;
+import java.util.logging.Logger;
 import java.util.zip.ZipFile;
 
 import kotlin.text.Charsets;
 
 public class RepositoryManagerImpl implements RepositoryManager {
+
+    private static final Logger sLogger = IdeLog.getCurrentLogger(RepositoryManagerImpl.class);
 
     private File cacheDir;
     private final List<Repository> repositories;
@@ -65,14 +71,17 @@ public class RepositoryManagerImpl implements RepositoryManager {
             String contents;
             try {
                 contents = CharStreams.toString(new InputStreamReader(is));
-                Pom parsed = new PomParser().parse(contents);
+                Pom parsed = new PomParser(this).parse(contents);
                 parsed.setGroupId(names[0]);
                 parsed.setArtifactId(names[1]);
                 parsed.setVersionName(names[2]);
                 pomFiles.add(parsed);
                 return parsed;
-            } catch (IOException | XmlPullParserException e) {
-                // ignored
+            } catch (IOException | XmlPullParserException | SAXException e) {
+                String message = "Failed to parse input stream.\n" +
+                                 "Declaration: " + Arrays.toString(names) + "\n" +
+                                 "Reason: " + e.getMessage();
+                sLogger.severe(message);
             }
         }
         return null;
@@ -88,8 +97,7 @@ public class RepositoryManagerImpl implements RepositoryManager {
                 }
             } catch (IOException e) {
                 if (i == repositories.size() - 1) {
-                    // The dependency is not found on all urls, log
-                    System.out.println("Dependency not found! " + appendUrl);
+                    sLogger.warning("Dependency " + appendUrl + " is not found.");
                 }
             }
         }
@@ -208,13 +216,15 @@ public class RepositoryManagerImpl implements RepositoryManager {
             // save pom files for later
             while (pomFiles.hasNext()) {
                 File pom = pomFiles.next();
-                PomParser parser = new PomParser();
+                PomParser parser = new PomParser(this);
                 try {
                     Pom parsed = parser.parse(pom);
                     this.pomFiles.add(parsed);
-                } catch (XmlPullParserException | IOException e) {
+                } catch (XmlPullParserException | IOException | SAXException e) {
                     // ignored
                     // TODO: should the file be deleted if its corrupt?
+                    sLogger.severe("Unable to parse file " + pom + "\n" +
+                                   "Reason: " + e.getMessage());
                 }
             }
         }

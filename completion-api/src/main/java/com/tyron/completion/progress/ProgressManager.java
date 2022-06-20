@@ -1,5 +1,7 @@
 package com.tyron.completion.progress;
 
+import android.app.ProgressDialog;
+import android.content.Context;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
@@ -7,10 +9,12 @@ import android.util.Log;
 import com.google.common.util.concurrent.AsyncCallable;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
+import com.tyron.common.TestUtil;
 
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.WeakHashMap;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -32,13 +36,18 @@ public class ProgressManager {
         getInstance().doCheckCanceled();
     }
 
-    private final ExecutorService mPool = Executors.newFixedThreadPool(8);
-    private final Handler mMainHandler = new Handler(Looper.getMainLooper());
+    private final ExecutorService mPool = Executors.newFixedThreadPool(32);
+    private final HandlerInterface mMainHandler;
 
     private final Map<Thread, ProgressIndicator> mThreadToIndicator;
 
     public ProgressManager() {
-        mThreadToIndicator = new HashMap<>();
+        mThreadToIndicator = new WeakHashMap<>();
+        if (TestUtil.isDalvik()) {
+            mMainHandler = new DefaultHandlerInterface(new Handler(Looper.getMainLooper()));
+        } else {
+            mMainHandler = new MockHandler();
+        }
     }
 
     /**
@@ -65,6 +74,15 @@ public class ProgressManager {
                 mThreadToIndicator.remove(currentThread);
             }
         });
+    }
+
+    public void runAsync(Context uiContext,
+                         Runnable runnable,
+                         ProgressIndicator indicator) {
+        ProgressDialog dialog = new ProgressDialog(uiContext);
+        dialog.show();
+
+        runAsync(runnable, i -> dialog.dismiss(), indicator);
     }
 
     /**

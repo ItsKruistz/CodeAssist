@@ -1,5 +1,7 @@
 package com.tyron.builder.compiler;
 
+import androidx.annotation.NonNull;
+
 import com.tyron.builder.exception.CompilationFailedException;
 import com.tyron.builder.log.ILogger;
 import com.tyron.builder.model.ModuleSettings;
@@ -17,11 +19,16 @@ public class ProjectBuilder {
     private final List<Module> mModules;
     private final Project mProject;
     private final ILogger mLogger;
+    private Builder.TaskListener mTaskListener;
 
     public ProjectBuilder(Project project, ILogger logger) throws IOException {
         mProject = project;
         mLogger = logger;
         mModules = project.getBuildOrder();
+    }
+
+    public void setTaskListener(@NonNull Builder.TaskListener listener) {
+        mTaskListener = listener;
     }
 
     public void build(BuildType type) throws IOException, CompilationFailedException {
@@ -36,7 +43,7 @@ public class ProjectBuilder {
                     .getString(ModuleSettings.MODULE_TYPE, "android_app");
             switch (Objects.requireNonNull(moduleType)) {
                 case "library":
-                    builder = new JarBuilder((JavaModule) module, mLogger);
+                    builder = new JarBuilder(mProject, (JavaModule) module, mLogger);
                     break;
                 default:
                 case "android_app":
@@ -47,13 +54,13 @@ public class ProjectBuilder {
                                                              " does not have a package name.");
                     }
                     if (type == BuildType.AAB) {
-                        builder = new AndroidAppBundleBuilder(androidModule, mLogger);
+                        builder = new AndroidAppBundleBuilder(mProject, androidModule, mLogger);
                     } else {
-                        builder = new AndroidAppBuilder(androidModule, mLogger);
+                        builder = new AndroidAppBuilder(mProject, androidModule, mLogger);
                     }
                     break;
             }
-
+            builder.setTaskListener(mTaskListener);
             builder.build(type);
         }
     }

@@ -12,10 +12,14 @@ import com.tyron.actions.Presentation;
 import com.tyron.builder.project.Project;
 import com.tyron.builder.project.api.FileManager;
 import com.tyron.builder.project.api.Module;
+import com.tyron.code.ApplicationLoader;
 import com.tyron.code.R;
+import com.tyron.code.event.EventManager;
+import com.tyron.code.ui.editor.Savable;
 import com.tyron.code.ui.main.MainFragment;
 import com.tyron.code.ui.main.MainViewModel;
 import com.tyron.completion.progress.ProgressManager;
+import com.tyron.fileeditor.api.FileDocumentManager;
 import com.tyron.fileeditor.api.FileEditor;
 
 import org.apache.commons.io.FileUtils;
@@ -28,8 +32,11 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 public class SaveAction extends AnAction {
+
+    public static final String ID = "saveAction";
 
     @Override
     public void update(@NonNull AnActionEvent event) {
@@ -56,56 +63,12 @@ public class SaveAction extends AnAction {
 
     @Override
     public void actionPerformed(@NonNull AnActionEvent e) {
-        MainViewModel viewModel = e.getRequiredData(MainFragment.MAIN_VIEW_MODEL_KEY);
-        List<FileEditor> editors = viewModel.getFiles()
-                .getValue();
-        if (editors == null) {
-            return;
-        }
-        List<File> filesToSave = editors.stream()
-                .map(FileEditor::getFile)
-                .collect(Collectors.toList());
-
-        Project project = e.getRequiredData(CommonDataKeys.PROJECT);
-        ProgressManager.getInstance()
-                .runNonCancelableAsync(() -> {
-                    List<IOException> exceptions = saveFiles(project, filesToSave);
-                    if (!exceptions.isEmpty()) {
-                        new MaterialAlertDialogBuilder(e.getDataContext()).setTitle(R.string.error)
-                                .setPositiveButton(android.R.string.ok, null)
-                                .setMessage(exceptions.stream()
-                                        .map(IOException::getMessage)
-                                        .collect(Collectors.joining("\n\n")))
-                                .show();
-                    }
-                });
+        doSave();
     }
 
-    @WorkerThread
-    private static List<IOException> saveFiles(Project project, List<File> files) {
-        List<IOException> exceptions = new ArrayList<>();
-        for (File file : files) {
-            Module module = project.getModule(file);
-            if (module == null) {
-                // TODO: try to save files without a module
-                continue;
-            }
-
-            FileManager fileManager = module.getFileManager();
-            Optional<CharSequence> fileContent = fileManager.getFileContent(file);
-            if (fileContent.isPresent()) {
-                try {
-                    FileUtils.writeStringToFile(file, fileContent.get()
-                            .toString(), StandardCharsets.UTF_8);
-                    Instant instant = Instant.ofEpochMilli(file.lastModified());
-
-                    ProgressManager.getInstance()
-                            .runLater(() -> fileManager.setLastModified(file, instant));
-                } catch (IOException e) {
-                    exceptions.add(e);
-                }
-            }
-        }
-        return exceptions;
+    public static void doSave() {
+        FileDocumentManager.getInstance().saveAllContents();
+        EventManager eventManager = ApplicationLoader.getInstance().getEventManager();
+        eventManager.dispatchEvent(new SaveEvent());
     }
 }

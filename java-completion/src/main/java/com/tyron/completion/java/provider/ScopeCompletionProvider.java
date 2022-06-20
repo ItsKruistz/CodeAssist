@@ -1,5 +1,6 @@
 package com.tyron.completion.java.provider;
 
+import static com.tyron.completion.java.util.CompletionItemFactory.classItem;
 import static com.tyron.completion.java.util.CompletionItemFactory.item;
 import static com.tyron.completion.java.util.CompletionItemFactory.method;
 import static com.tyron.completion.java.util.CompletionItemFactory.overridableMethod;
@@ -11,18 +12,22 @@ import com.tyron.completion.java.util.ElementUtil;
 import com.tyron.completion.model.CompletionItem;
 import com.tyron.completion.model.CompletionList;
 
-import org.openjdk.javax.lang.model.element.Element;
-import org.openjdk.javax.lang.model.element.ElementKind;
-import org.openjdk.javax.lang.model.element.ExecutableElement;
-import org.openjdk.javax.lang.model.type.ExecutableType;
-import org.openjdk.source.tree.Scope;
-import org.openjdk.source.tree.Tree;
-import org.openjdk.source.util.TreePath;
-import org.openjdk.source.util.Trees;
+import javax.lang.model.element.Element;
+import javax.lang.model.element.ElementKind;
+import javax.lang.model.element.ExecutableElement;
+import javax.lang.model.type.ExecutableType;
+import com.sun.source.tree.ClassTree;
+import com.sun.source.tree.CompilationUnitTree;
+import com.sun.source.tree.Scope;
+import com.sun.source.tree.Tree;
+import com.sun.source.util.TreePath;
+import com.sun.source.util.Trees;
 
 import java.util.Collections;
+import java.util.List;
 import java.util.Objects;
 import java.util.function.Predicate;
+import java.util.stream.Collectors;
 
 import me.xdrop.fuzzywuzzy.FuzzySearch;
 
@@ -41,7 +46,7 @@ public class ScopeCompletionProvider extends BaseCompletionProvider {
 
     public static void addCompletionItems(CompileTask task, TreePath path, String partial,
                                           boolean endsWithParen, CompletionList.Builder builder) {
-        Trees trees = Trees.instance(task.task);
+        Trees trees = task.getTrees();
         Scope scope = trees.getScope(path);
 
         Predicate<CharSequence> filter = p1 -> {
@@ -88,6 +93,20 @@ public class ScopeCompletionProvider extends BaseCompletionProvider {
                 } else {
                     item.setSortText(JavaSortCategory.ACCESSIBLE_SYMBOL.toString());
                 }
+                builder.addItem(item);
+            }
+        }
+
+        CompilationUnitTree root = task.root();
+        if (root != null) {
+            List<? extends Tree> typeDecls = root.getTypeDecls();
+            List<ClassTree> classTrees = typeDecls.stream()
+                    .filter(it -> it instanceof ClassTree)
+                    .map(it -> (ClassTree) it)
+                    .collect(Collectors.toList());
+            for (ClassTree classTree : classTrees) {
+                CompletionItem item = classItem(classTree.getSimpleName().toString());
+                item.setSortText(JavaSortCategory.ACCESSIBLE_SYMBOL.toString());
                 builder.addItem(item);
             }
         }

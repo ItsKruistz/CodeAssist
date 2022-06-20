@@ -9,6 +9,8 @@ import static com.tyron.completion.progress.ProgressManager.checkCanceled;
 
 import android.util.Log;
 
+import com.sun.tools.javac.api.BasicJavacTask;
+import com.sun.tools.javac.api.JavacTaskImpl;
 import com.tyron.builder.model.SourceFileObject;
 import com.tyron.common.util.StringSearch;
 import com.tyron.completion.java.action.FindCurrentPath;
@@ -16,21 +18,23 @@ import com.tyron.completion.java.compiler.CompileTask;
 import com.tyron.completion.java.compiler.CompilerContainer;
 import com.tyron.completion.java.compiler.JavaCompilerService;
 import com.tyron.completion.java.compiler.ParseTask;
+import com.tyron.completion.java.compiler.services.CancelAbort;
 import com.tyron.completion.java.patterns.JavacTreePattern;
 import com.tyron.completion.java.util.FileContentFixer;
 import com.tyron.completion.model.CompletionList;
+import com.tyron.completion.progress.ProcessCanceledException;
 
 import org.jetbrains.kotlin.com.intellij.util.ProcessingContext;
-import org.openjdk.source.tree.CaseTree;
-import org.openjdk.source.tree.CompilationUnitTree;
-import org.openjdk.source.tree.IdentifierTree;
-import org.openjdk.source.tree.ParameterizedTypeTree;
-import org.openjdk.source.tree.ReturnTree;
-import org.openjdk.source.tree.Tree;
-import org.openjdk.source.util.JavacTask;
-import org.openjdk.source.util.TreePath;
-import org.openjdk.source.util.Trees;
-import org.openjdk.tools.javac.tree.JCTree;
+import com.sun.source.tree.CaseTree;
+import com.sun.source.tree.CompilationUnitTree;
+import com.sun.source.tree.IdentifierTree;
+import com.sun.source.tree.ParameterizedTypeTree;
+import com.sun.source.tree.ReturnTree;
+import com.sun.source.tree.Tree;
+import com.sun.source.util.JavacTask;
+import com.sun.source.util.TreePath;
+import com.sun.source.util.Trees;
+import com.sun.tools.javac.tree.JCTree;
 
 import java.io.File;
 import java.nio.file.Path;
@@ -75,8 +79,12 @@ public class Completions {
             StringBuilder pruned = new PruneMethodBodies(task.task).scan(task.root, index);
             int end = StringSearch.endOfLine(pruned, (int) index);
             pruned.insert(end, ';');
-            contents = new FileContentFixer(compiler.compiler.getCurrentContext())
-                    .fixFileContent(pruned);
+            if (compiler.compiler.getCurrentContext() != null) {
+                contents = new FileContentFixer(compiler.compiler.getCurrentContext()).fixFileContent(
+                        pruned);
+            } else {
+                contents = pruned.toString();
+            }
         } catch (IndexOutOfBoundsException e) {
             Log.w(TAG, "Unable to fix file content", e);
             return null;
@@ -93,18 +101,47 @@ public class Completions {
         boolean endsWithParen = endsWithParen(contents, (int) cursor);
 
         checkCanceled();
+        if (compiler.getCachedContainer().isWriting()) {
+            return null;
+        }
+
         CompilerContainer container = compiler.compile(Collections.singletonList(source));
-        return container.get(task -> {
-            TreePath path = new FindCurrentPath(task.task).scan(task.root(), cursor);
-            String modifiedPartial = partial;
-            if (path.getLeaf().getKind() == Tree.Kind.IMPORT) {
-                modifiedPartial = StringSearch.qualifiedPartialIdentifier(contents, (int) cursor);
-                if (modifiedPartial.endsWith(FileContentFixer.INJECTED_IDENT)) {
-                    modifiedPartial = modifiedPartial.substring(0, modifiedPartial.length() - FileContentFixer.INJECTED_IDENT.length());
+
+        try {
+            return container.get(task -> {
+                if (task == null || task.task == null) {
+                    return null;
                 }
+                if (((JavacTaskImpl) task.task).getContext() == null) {
+                    return null;
+                }
+                TreePath path = new FindCurrentPath(task.task).scan(task.root(), cursor);
+                String modifiedPartial = partial;
+                if (path.getLeaf()
+                            .getKind() == Tree.Kind.IMPORT) {
+                    modifiedPartial = StringSearch.qualifiedPartialIdentifier(contents, (int) cursor);
+                    if (modifiedPartial.endsWith(FileContentFixer.INJECTED_IDENT)) {
+                        modifiedPartial = modifiedPartial.substring(0, modifiedPartial.length() -
+                                                                       FileContentFixer.INJECTED_IDENT.length());
+                    }
+                }
+                return getCompletionList(task, path, modifiedPartial, endsWithParen);
+            });
+        } catch (Throwable e) {
+            boolean cancelled = e instanceof CancelAbort || e.getCause() instanceof CancelAbort;
+
+            if (cancelled || e instanceof ProcessCanceledException) {
+                compiler.close();
+                if (compiler.getCompileBatch() != null) {
+                    compiler.getCompileBatch().borrow.close();
+                }
+                throw e;
             }
-            return getCompletionList(task, path, modifiedPartial, endsWithParen);
-        });
+
+
+            compiler.destroy();
+            throw e;
+        }
     }
 
     private CompletionList.Builder getCompletionList(CompileTask task, TreePath path, String partial,
@@ -117,6 +154,7 @@ public class Completions {
                 if (INSIDE_PARAMETERIZED.accepts(path.getLeaf(), context)) {
                     new ClassNameCompletionProvider(compiler)
                             .complete(builder, task, path, partial, endsWithParen);
+                    break;
                 } else if (SWITCH_CONSTANT.accepts(path.getLeaf(), context)) {
                     new SwitchConstantCompletionProvider(compiler)
                             .complete(builder, task, path, partial, endsWithParen);

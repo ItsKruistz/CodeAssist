@@ -100,14 +100,15 @@
 
     <PreferenceCategory
         app:iconSpaceReserved="false"
-        android:title="Keyboard">
+        android:title="@string/editor_tabs_settings_title">
 
         <SwitchPreference
-            android:defaultValue="false"
-            android:iconSpaceReserved="false"
-            android:key="keyboard_enable_suggestions"
             app:iconSpaceReserved="false"
-            android:title="@string/keyboard_enable_suggestions_description" />
+            app:defaultValue="true"
+            app:title="@string/editor_tab_unique_file_name"
+            app:summary="@string/editor_tab_unique_file_name_summary"
+            app:key="editor_tab_unique_file_name" />
 
     </PreferenceCategory>
+
 </PreferenceScreen>

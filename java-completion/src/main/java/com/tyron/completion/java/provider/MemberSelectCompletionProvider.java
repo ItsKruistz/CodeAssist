@@ -12,21 +12,21 @@ import com.tyron.completion.java.compiler.JavaCompilerService;
 import com.tyron.completion.model.CompletionItem;
 import com.tyron.completion.model.CompletionList;
 
-import org.openjdk.javax.lang.model.element.Element;
-import org.openjdk.javax.lang.model.element.ElementKind;
-import org.openjdk.javax.lang.model.element.ExecutableElement;
-import org.openjdk.javax.lang.model.element.Modifier;
-import org.openjdk.javax.lang.model.element.TypeElement;
-import org.openjdk.javax.lang.model.type.ArrayType;
-import org.openjdk.javax.lang.model.type.DeclaredType;
-import org.openjdk.javax.lang.model.type.PrimitiveType;
-import org.openjdk.javax.lang.model.type.TypeMirror;
-import org.openjdk.javax.lang.model.type.TypeVariable;
-import org.openjdk.source.tree.MemberSelectTree;
-import org.openjdk.source.tree.Scope;
-import org.openjdk.source.tree.Tree;
-import org.openjdk.source.util.TreePath;
-import org.openjdk.source.util.Trees;
+import javax.lang.model.element.Element;
+import javax.lang.model.element.ElementKind;
+import javax.lang.model.element.ExecutableElement;
+import javax.lang.model.element.Modifier;
+import javax.lang.model.element.TypeElement;
+import javax.lang.model.type.ArrayType;
+import javax.lang.model.type.DeclaredType;
+import javax.lang.model.type.PrimitiveType;
+import javax.lang.model.type.TypeMirror;
+import javax.lang.model.type.TypeVariable;
+import com.sun.source.tree.MemberSelectTree;
+import com.sun.source.tree.Scope;
+import com.sun.source.tree.Tree;
+import com.sun.source.util.TreePath;
+import com.sun.source.util.Trees;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -48,9 +48,15 @@ public class MemberSelectCompletionProvider extends BaseCompletionProvider {
 
         MemberSelectTree select = (MemberSelectTree) path.getLeaf();
         path = new TreePath(path, select.getExpression());
-        Trees trees = Trees.instance(task.task);
-        Element element = trees.getElement(path);
+        Trees trees = task.getTrees();
+        Element element;
+        try {
+            element = trees.getElement(path);
+        } catch (Throwable t) {
+            element = null;
+        }
         boolean isStatic = element instanceof TypeElement;
+
         Scope scope = trees.getScope(path);
         TypeMirror type = trees.getTypeMirror(path);
 

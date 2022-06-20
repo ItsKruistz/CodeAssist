@@ -1,6 +1,8 @@
 package com.tyron.code.ui.project;
 
 import android.Manifest;
+import android.app.Dialog;
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
@@ -15,6 +17,7 @@ import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import androidx.annotation.VisibleForTesting;
 import androidx.core.content.ContextCompat;
 import androidx.core.view.ViewKt;
 import androidx.core.widget.NestedScrollView;
@@ -30,6 +33,7 @@ import com.google.android.material.appbar.MaterialToolbar;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.google.android.material.floatingactionbutton.ExtendedFloatingActionButton;
 import com.google.android.material.transition.MaterialFade;
+import com.google.android.material.transition.MaterialFadeThrough;
 import com.google.android.material.transition.MaterialSharedAxis;
 import com.tyron.builder.project.Project;
 import com.tyron.code.R;
@@ -41,6 +45,7 @@ import com.tyron.code.ui.wizard.WizardFragment;
 import com.tyron.code.util.UiUtilsKt;
 import com.tyron.common.util.AndroidUtilities;
 import com.tyron.common.SharedPreferenceKeys;
+import com.tyron.completion.progress.ProgressManager;
 
 import org.apache.commons.io.FileUtils;
 
@@ -64,6 +69,10 @@ public class ProjectManagerFragment extends Fragment {
     private ActivityResultLauncher<String[]> mPermissionLauncher;
     private final ActivityResultContracts.RequestMultiplePermissions mPermissionsContract =
             new ActivityResultContracts.RequestMultiplePermissions();
+
+    private String mPreviousPath;
+
+    private FilePickerDialogFixed mDirectoryPickerDialog;
 
     @Override
     public void onCreate(@Nullable Bundle savedInstanceState) {
@@ -110,7 +119,6 @@ public class ProjectManagerFragment extends Fragment {
             int id = item.getItemId();
 
             if (id == R.id.projects_path) {
-                setSavePath(null);
                 checkSavePath();
                 return true;
             }
@@ -143,8 +151,6 @@ public class ProjectManagerFragment extends Fragment {
         mRecyclerView = view.findViewById(R.id.projects_recycler);
         mRecyclerView.setLayoutManager(new LinearLayoutManager(requireContext()));
         mRecyclerView.setAdapter(mAdapter);
-
-        checkSavePath();
     }
 
     private boolean inflateProjectMenus(View view, Project project) {
@@ -239,18 +245,37 @@ public class ProjectManagerFragment extends Fragment {
         loadProjects();
     }
 
+    @VisibleForTesting
+    String getPreviousPath() {
+        return mPreviousPath;
+    }
+
+    @VisibleForTesting
+    FilePickerDialogFixed getDirectoryPickerDialog() {
+        return mDirectoryPickerDialog;
+    }
+
     private void showDirectorySelectDialog() {
         DialogProperties properties = new DialogProperties();
         properties.selection_type = DialogConfigs.DIR_SELECT;
         properties.selection_mode = DialogConfigs.SINGLE_MODE;
         properties.root = Environment.getExternalStorageDirectory();
+        if (mPreviousPath != null && new File(mPreviousPath).exists()) {
+            properties.offset = new File(mPreviousPath);
+        }
         FilePickerDialogFixed dialogFixed = new FilePickerDialogFixed(requireContext(), properties);
         dialogFixed.setTitle(R.string.project_manager_save_location_title);
         dialogFixed.setDialogSelectionListener(files -> {
             setSavePath(files[0]);
             loadProjects();
         });
+        dialogFixed.setOnDismissListener(__ -> {
+            mPreviousPath = dialogFixed.getCurrentPath();
+            mDirectoryPickerDialog = null;
+        });
         dialogFixed.show();
+
+        mDirectoryPickerDialog = dialogFixed;
     }
 
     private boolean permissionsGranted() {
@@ -311,55 +336,63 @@ public class ProjectManagerFragment extends Fragment {
             if (getActivity() != null) {
                 requireActivity().runOnUiThread(() -> {
                     toggleLoading(false);
-                    mAdapter.submitList(projects);
-                    toggleNullProject(projects);
+                    ProgressManager.getInstance().runLater(() -> {
+                        mAdapter.submitList(projects);
+                        toggleNullProject(projects);
+                    }, 300);
                 });
             }
         });
     }
 
     private void toggleNullProject(List<Project> projects) {
-        if (getActivity() == null || isDetached()) {
-            return;
-        }
-        View view = getView();
-        if (view == null) {
-            return;
-        }
+        ProgressManager.getInstance().runLater(() -> {
+            if (getActivity() == null || isDetached()) {
+                return;
+            }
+            View view = getView();
+            if (view == null) {
+                return;
+            }
 
-        View recycler = view.findViewById(R.id.projects_recycler);
-        View empty = view.findViewById(R.id.empty_projects);
+            View recycler = view.findViewById(R.id.projects_recycler);
+            View empty = view.findViewById(R.id.empty_projects);
 
-        TransitionManager.beginDelayedTransition(
-                (ViewGroup) recycler.getParent(), new MaterialFade());
-        if (projects.size() == 0) {
-            recycler.setVisibility(View.GONE);
-            empty.setVisibility(View.VISIBLE);
-        } else {
-            recycler.setVisibility(View.VISIBLE);
-            empty.setVisibility(View.GONE);
-        }
+            TransitionManager.beginDelayedTransition(
+                    (ViewGroup) recycler.getParent(), new MaterialFade());
+            if (projects.size() == 0) {
+                recycler.setVisibility(View.GONE);
+                empty.setVisibility(View.VISIBLE);
+            } else {
+                recycler.setVisibility(View.VISIBLE);
+                empty.setVisibility(View.GONE);
+            }
+        }, 300);
     }
 
     private void toggleLoading(boolean show) {
-        if (getActivity() == null || isDetached()) {
-            return;
-        }
-        View view = getView();
-        if (view == null) {
-            return;
-        }
-        View recycler = view.findViewById(R.id.projects_recycler);
-        View empty = view.findViewById(R.id.empty_container);
+        ProgressManager.getInstance().runLater(() -> {
+            if (getActivity() == null || isDetached()) {
+                return;
+            }
+            View view = getView();
+            if (view == null) {
+                return;
+            }
+            View recycler = view.findViewById(R.id.projects_recycler);
+            View empty = view.findViewById(R.id.empty_container);
+            View empty_project = view.findViewById(R.id.empty_projects);
+            empty_project.setVisibility(View.GONE);
 
-        TransitionManager.beginDelayedTransition((ViewGroup) recycler.getParent(),
-                new MaterialFade());
-        if (show) {
-            recycler.setVisibility(View.GONE);
-            empty.setVisibility(View.VISIBLE);
-        } else {
-            recycler.setVisibility(View.VISIBLE);
-            empty.setVisibility(View.GONE);
-        }
+            TransitionManager.beginDelayedTransition((ViewGroup) recycler.getParent(),
+                                                     new MaterialFade());
+            if (show) {
+                recycler.setVisibility(View.GONE);
+                empty.setVisibility(View.VISIBLE);
+            } else {
+                recycler.setVisibility(View.VISIBLE);
+                empty.setVisibility(View.GONE);
+            }
+        }, 300);
     }
 }

@@ -4,6 +4,7 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.SharedPreferences;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
@@ -15,7 +16,12 @@ import android.view.ViewGroup;
 import androidx.activity.OnBackPressedCallback;
 import androidx.annotation.NonNull;
 import androidx.appcompat.widget.Toolbar;
+import androidx.appcompat.widget.ViewUtils;
 import androidx.core.view.GravityCompat;
+import androidx.core.view.OnApplyWindowInsetsListener;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.ViewKt;
+import androidx.core.view.WindowInsetsCompat;
 import androidx.drawerlayout.widget.DrawerLayout;
 import androidx.fragment.app.Fragment;
 import androidx.lifecycle.ViewModelProvider;
@@ -36,6 +42,7 @@ import com.tyron.code.ApplicationLoader;
 import com.tyron.code.ui.file.event.RefreshRootEvent;
 import com.tyron.code.util.UiUtilsKt;
 import com.tyron.common.logging.IdeLog;
+import com.tyron.completion.progress.ProgressManager;
 import com.tyron.fileeditor.api.FileEditor;
 import com.tyron.fileeditor.api.FileEditorSavedState;
 import com.tyron.code.ui.project.ProjectManager;
@@ -53,7 +60,7 @@ import com.tyron.code.ui.file.FileViewModel;
 import com.tyron.completion.java.provider.CompletionEngine;
 
 import org.jetbrains.kotlin.com.intellij.openapi.util.Key;
-import org.openjdk.javax.tools.Diagnostic;
+import javax.tools.Diagnostic;
 
 import java.io.File;
 import java.time.Duration;
@@ -158,6 +165,7 @@ public class MainFragment extends Fragment implements ProjectManager.OnProjectOp
         getChildFragmentManager().setFragmentResultListener(REFRESH_TOOLBAR_KEY,
                                                             getViewLifecycleOwner(),
                                                             (key, __) -> refreshToolbar());
+
         refreshToolbar();
 
         if (savedInstanceState != null) {
@@ -223,6 +231,7 @@ public class MainFragment extends Fragment implements ProjectManager.OnProjectOp
                 .observe(getViewLifecycleOwner(), indexing -> {
                     mProgressBar.setVisibility(indexing ? View.VISIBLE : View.GONE);
                     CompletionEngine.setIndexing(indexing);
+                    refreshToolbar();
                 });
         mMainViewModel.getCurrentState()
                 .observe(getViewLifecycleOwner(), mToolbar::setSubtitle);
@@ -263,6 +272,25 @@ public class MainFragment extends Fragment implements ProjectManager.OnProjectOp
             }
         };
         IdeLog.getLogger().addHandler(mHandler);
+
+        // can be null on tablets
+        View navRoot = view.findViewById(R.id.nav_root);
+
+        ViewCompat.setOnApplyWindowInsetsListener(mRoot, (v, insets) -> {
+            if (navRoot != null) {
+                ViewCompat.dispatchApplyWindowInsets(navRoot, insets);
+            }
+            ViewGroup viewGroup = (ViewGroup) mRoot;
+            for (int i = 0; i < viewGroup.getChildCount(); i++) {
+                View child = viewGroup.getChildAt(i);
+                if (child == navRoot) {
+                    continue;
+                }
+
+                ViewCompat.dispatchApplyWindowInsets(child, insets);
+            }
+            return ViewCompat.onApplyWindowInsets(v, insets);
+        });
     }
 
     @Override
@@ -270,13 +298,6 @@ public class MainFragment extends Fragment implements ProjectManager.OnProjectOp
         super.onDestroy();
 
         ProjectManager manager = ProjectManager.getInstance();
-        Project project = manager.getCurrentProject();
-        if (project != null) {
-            for (Module module : project.getModules()) {
-                module.getFileManager()
-                        .shutdown();
-            }
-        }
         manager.removeOnProjectOpenListener(this);
 
         if (mLogReceiver != null) {
@@ -297,16 +318,21 @@ public class MainFragment extends Fragment implements ProjectManager.OnProjectOp
     public void onPause() {
         super.onPause();
 
-        saveAll();
         mServiceConnection.setShouldShowNotification(true);
     }
 
     @Override
+    public void onResume() {
+        super.onResume();
+
+        refreshToolbar();
+    }
+
+    @Override
     public void onSaveInstanceState(@NonNull Bundle outState) {
-        saveAll();
         if (mRoot instanceof DrawerLayout) {
             outState.putBoolean("start_drawer_state",
-                                ((DrawerLayout) mRoot).isDrawerOpen(GravityCompat.START));
+                    ((DrawerLayout) mRoot).isDrawerOpen(GravityCompat.START));
         }
         super.onSaveInstanceState(outState);
     }
@@ -336,8 +362,10 @@ public class MainFragment extends Fragment implements ProjectManager.OnProjectOp
         }
 
         if (project.equals(ProjectManager.getInstance().getCurrentProject())) {
-            saveAll();
+            project.getSettings().refresh();
         }
+
+//        IndexServiceConnection.restoreFileEditors(project, mMainViewModel);
 
         mProject = project;
         mIndexServiceConnection.setProject(project);
@@ -355,44 +383,10 @@ public class MainFragment extends Fragment implements ProjectManager.OnProjectOp
         requireActivity().bindService(intent, mIndexServiceConnection, Context.BIND_IMPORTANT);
     }
 
-    private void saveAll() {
-        if (mProject == null) {
-            return;
-        }
-
-        if (CompletionEngine.isIndexing()) {
-            return;
-        }
-
-        Collection<Module> modules = mProject.getModules();
-        modules.forEach(it -> it.getFileManager().saveContents());
-
-        getChildFragmentManager().setFragmentResult(EditorContainerFragment.SAVE_ALL_KEY,
-                                                    Bundle.EMPTY);
-
-        ProjectSettings settings = mProject.getSettings();
-        if (settings == null) {
-            return;
-        }
-
-        List<FileEditor> items = mMainViewModel.getFiles()
-                .getValue();
-        if (items != null) {
-            String itemString = new Gson().toJson(items.stream()
-                                                          .map(FileEditorSavedState::new)
-                                                          .collect(Collectors.toList()));
-            settings.edit()
-                    .putString(ProjectSettings.SAVED_EDITOR_FILES, itemString)
-                    .apply();
-        }
-    }
-
     private void compile(BuildType type) {
         if (mServiceConnection.isCompiling() || CompletionEngine.isIndexing()) {
             return;
         }
-
-        saveAll();
         mServiceConnection.setBuildType(type);
 
         mMainViewModel.setCurrentState(getString(R.string.compilation_state_compiling));
@@ -442,11 +436,24 @@ public class MainFragment extends Fragment implements ProjectManager.OnProjectOp
                 mLogReceiver = null;
             }
         }
+
+        ProgressManager.getInstance().runLater(() -> {
+            if (getContext() == null) {
+                return;
+            }
+            refreshToolbar();
+        });
     }
 
     private void injectData(DataContext context) {
-        context.putData(CommonDataKeys.PROJECT, ProjectManager.getInstance()
-                .getCurrentProject());
+        Boolean indexing = mMainViewModel.isIndexing().getValue();
+        // to please lint
+        if (indexing == null) {
+            indexing = true;
+        }
+        if (!indexing) {
+            context.putData(CommonDataKeys.PROJECT, ProjectManager.getInstance().getCurrentProject());
+        }
         context.putData(CommonDataKeys.ACTIVITY, getActivity());
         context.putData(MAIN_VIEW_MODEL_KEY, mMainViewModel);
         context.putData(COMPILE_CALLBACK_KEY, mCompileCallback);

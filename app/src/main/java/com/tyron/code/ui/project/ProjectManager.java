@@ -18,6 +18,7 @@ import com.tyron.builder.project.api.Module;
 import com.tyron.code.ApplicationLoader;
 import com.tyron.code.template.CodeTemplate;
 import com.tyron.code.util.ProjectUtils;
+import com.tyron.common.logging.IdeLog;
 import com.tyron.completion.index.CompilerService;
 import com.tyron.completion.java.compiler.CompilerContainer;
 import com.tyron.completion.java.JavaCompilerProvider;
@@ -27,19 +28,25 @@ import com.tyron.completion.progress.ProgressManager;
 import com.tyron.completion.xml.XmlIndexProvider;
 import com.tyron.completion.xml.XmlRepository;
 import com.tyron.completion.xml.task.InjectResourcesTask;
+import com.tyron.viewbinding.task.InjectViewBindingTask;
 
 import org.apache.commons.io.FileUtils;
-import org.eclipse.lemminx.dom.DOMParser;
 
 import java.io.File;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.Executors;
+import java.util.logging.Logger;
+
+import kotlin.collections.CollectionsKt;
 
 public class ProjectManager {
+
+    private static final Logger LOG = IdeLog.getCurrentLogger(ProjectManager.class);
 
     public interface TaskListener {
         void onTaskStarted(String message);
@@ -109,80 +116,78 @@ public class ProjectManager {
         }
 
         try {
+            mCurrentProject.setIndexing(true);
             mCurrentProject.index();
         } catch (IOException exception) {
             logger.warning("Failed to open project: " + exception.getMessage());
         }
 
-        Module module = mCurrentProject.getMainModule();
+//        Module module = mCurrentProject.getMainModule();
+//
+//        if (module instanceof AndroidModule) {
+//            mListener.onTaskStarted("Generating resource files.");
+//
+//            ManifestMergeTask manifestMergeTask =
+//                    new ManifestMergeTask(project, (AndroidModule) module, logger);
+//            IncrementalAapt2Task task =
+//                    new IncrementalAapt2Task(project, (AndroidModule) module, logger, false);
+//            try {
+//                manifestMergeTask.prepare(BuildType.DEBUG);
+//                manifestMergeTask.run();
+//
+//                task.prepare(BuildType.DEBUG);
+//                task.run();
+//            } catch (IOException | CompilationFailedException e) {
+//                logger.warning("Unable to generate resource classes " + e.getMessage());
+//            }
+//        }
+//
+//        if (module instanceof JavaModule) {
+//            if (module instanceof AndroidModule) {
+//                mListener.onTaskStarted("Indexing XML files.");
+//
+//                XmlIndexProvider index = CompilerService.getInstance()
+//                        .getIndex(XmlIndexProvider.KEY);
+//                index.clear();
+//
+//                XmlRepository xmlRepository = index.get(project, module);
+//                try {
+//                    xmlRepository.initialize((AndroidModule) module);
+//                } catch (IOException e) {
+//                    String message = "Unable to initialize resource repository. " +
+//                                     "Resource code completion might be incomplete or unavailable. \n" +
+//                                     "Reason: " + e.getMessage();
+//                    LOG.warning(message);
+//                }
+//            }
+//
+//            mListener.onTaskStarted("Indexing");
+//            try {
+//                JavaCompilerProvider provider = CompilerService.getInstance()
+//                        .getIndex(JavaCompilerProvider.KEY);
+//                JavaCompilerService service = provider.get(project, module);
+//
+//                if (module instanceof AndroidModule) {
+//                    InjectResourcesTask.inject(project, (AndroidModule) module);
+//                    InjectViewBindingTask.inject(project, (AndroidModule) module);
+//                }
+//
+//                JavaModule javaModule = ((JavaModule) module);
+//                Collection<File> files = javaModule.getJavaFiles().values();
+//                File first = CollectionsKt.firstOrNull(files);
+//                if (first != null) {
+//                    service.compile(first.toPath());
+//                }
+//            } catch (Throwable e) {
+//                String message =
+//                        "Failure indexing project.\n" + Throwables.getStackTraceAsString(e);
+//
+//            }
 
-        if (module instanceof JavaModule) {
-            JavaModule javaModule = (JavaModule) module;
-            try {
-                downloadLibraries(javaModule, mListener, logger);
-            } catch (IOException e) {
-                logger.error(e.getMessage());
-            }
-        }
+//            mListener.onComplete(project, false, message);
+//        }
 
-
-        if (module instanceof AndroidModule) {
-            mListener.onTaskStarted("Generating resource files.");
-
-            ManifestMergeTask manifestMergeTask =
-                    new ManifestMergeTask((AndroidModule) module, logger);
-            IncrementalAapt2Task task =
-                    new IncrementalAapt2Task((AndroidModule) module, logger, false);
-            try {
-                manifestMergeTask.prepare(BuildType.DEBUG);
-                manifestMergeTask.run();
-
-                task.prepare(BuildType.DEBUG);
-                task.run();
-            } catch (IOException | CompilationFailedException e) {
-                logger.warning("Unable to generate resource classes " + e.getMessage());
-            }
-        }
-        if (module instanceof JavaModule) {
-            if (module instanceof AndroidModule) {
-                mListener.onTaskStarted("Indexing XML files.");
-
-                XmlIndexProvider index = CompilerService.getInstance()
-                        .getIndex(XmlIndexProvider.KEY);
-                index.clear();
-
-                XmlRepository xmlRepository = index.get(project, module);
-                try {
-                    xmlRepository.initialize((AndroidModule) module);
-                } catch (IOException e) {
-                    // ignored
-                }
-            }
-
-            mListener.onTaskStarted("Indexing");
-            try {
-                JavaCompilerProvider provider = CompilerService.getInstance()
-                        .getIndex(JavaCompilerProvider.KEY);
-                JavaCompilerService service = provider.get(project, module);
-
-                if (module instanceof AndroidModule) {
-                    InjectResourcesTask injectTask =
-                            new InjectResourcesTask(project, (AndroidModule) module);
-                    injectTask.inject(file -> {
-                        if (service != null) {
-                            service.compile(Collections.singletonList(
-                                    new SourceFileObject(file.toPath(), (JavaModule) null,
-                                                         Instant.now())));
-                        }
-                    });
-                }
-            } catch (Throwable e) {
-                String message =
-                        "Failure indexing project.\n" + Throwables.getStackTraceAsString(e);
-                mListener.onComplete(project, false, message);
-            }
-        }
-
+        mCurrentProject.setIndexing(false);
         mListener.onComplete(project, true, "Index successful");
     }
 

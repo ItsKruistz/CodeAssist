@@ -101,8 +101,12 @@ public class CodeAssistCompletionWindow extends EditorAutoCompletion {
 
     @Override
     public void cancelCompletion() {
-        ProgressManager.getInstance().cancelThread(mThread);
+        if (mThread != null) {
+            ProgressManager.getInstance().cancelThread(mThread);
+        }
         super.cancelCompletion();
+
+        getPopup().dismiss();
     }
 
     @Override
@@ -111,7 +115,7 @@ public class CodeAssistCompletionWindow extends EditorAutoCompletion {
             return;
         }
         Content text = mEditor.getText();
-        if (text.getCursor().isSelected() || checkNoCompletion()) {
+        if (text.getCursor().isSelected()) {
             hide();
             return;
         }
@@ -134,13 +138,17 @@ public class CodeAssistCompletionWindow extends EditorAutoCompletion {
             mAdapter.notifyDataSetChanged();
             float newHeight = mAdapter.getItemHeight() * mAdapter.getCount();
             setSize(getWidth(), (int) Math.min(newHeight, mMaxHeight));
-            if (!isShowing()) {
+
+            if (!getPopup().isShowing()) {
+                dismiss();
                 show();
             }
+
             if (mAdapter.getCount() >= 1) {
                 setCurrent(0);
             }
         }, mEditor.getEditorLanguage().getInterruptionLevel());
+        publisher.setUpdateThreshold(1);
         reference.set(publisher.getItems());
 
         mThread = new CompletionThread(mRequestTime, publisher);

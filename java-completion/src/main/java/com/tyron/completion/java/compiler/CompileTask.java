@@ -3,8 +3,8 @@ package com.tyron.completion.java.compiler;
 import android.annotation.SuppressLint;
 import android.net.Uri;
 
-import org.openjdk.source.tree.CompilationUnitTree;
-import org.openjdk.source.util.JavacTask;
+import com.sun.source.tree.CompilationUnitTree;
+import com.sun.source.util.JavacTask;
 
 
 import java.io.File;
@@ -12,8 +12,9 @@ import java.net.URI;
 import java.nio.file.Path;
 import java.util.List;
 
-import org.openjdk.javax.tools.Diagnostic;
-import org.openjdk.javax.tools.JavaFileObject;
+import javax.tools.Diagnostic;
+import javax.tools.JavaFileObject;
+import com.sun.source.util.Trees;
 
 public class CompileTask implements AutoCloseable {
 
@@ -22,11 +23,19 @@ public class CompileTask implements AutoCloseable {
     public final List<CompilationUnitTree> roots;
     public final List<Diagnostic<? extends JavaFileObject>> diagnostics;
 
+    private final Trees trees;
+
     public CompileTask(CompileBatch batch) {
         mCompileBatch = batch;
         this.task = batch.task;
+        this.trees = Trees.instance(task);
+
         this.roots = batch.roots;
         this.diagnostics = batch.parent.getDiagnostics();
+    }
+
+    public Trees getTrees() {
+        return trees;
     }
 
     public CompilationUnitTree root() {
@@ -61,5 +70,9 @@ public class CompileTask implements AutoCloseable {
     @Override
     public void close() {
         mCompileBatch.close();
+        ReusableCompiler.Borrow borrow = mCompileBatch.borrow;
+        if (borrow != null && !borrow.closed) {
+            borrow.close();
+        }
     }
 }

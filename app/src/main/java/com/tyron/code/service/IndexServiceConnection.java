@@ -60,27 +60,6 @@ public class IndexServiceConnection implements ServiceConnection {
         mMainViewModel.setCurrentState(null);
     }
 
-    private List<FileEditor> getOpenedFiles(ProjectSettings settings) {
-        String openedFilesString = settings.getString(ProjectSettings.SAVED_EDITOR_FILES, null);
-        if (openedFilesString != null) {
-            try {
-                Type type = new TypeToken<List<FileEditorSavedState>>() {
-                }.getType();
-                List<FileEditorSavedState> savedStates =
-                        new Gson().fromJson(openedFilesString, type);
-                return savedStates.stream()
-                        .filter(it -> it.getFile()
-                                .exists())
-                        .map(FileEditorManagerImpl.getInstance()::openFile)
-                        .collect(Collectors.toList());
-            } catch (Throwable e) {
-                // ignored, users may have edited the file manually and is corrupt
-                // just return an empty editor list
-            }
-        }
-        return new ArrayList<>();
-    }
-
     private class TaskListener implements ProjectManager.TaskListener {
 
         @Override
@@ -99,19 +78,6 @@ public class IndexServiceConnection implements ServiceConnection {
                 if (project.equals(currentProject)) {
                     mMainViewModel.setToolbarTitle(project.getRootFile()
                                                            .getName());
-                    List<FileEditor> openedFiles = getOpenedFiles(currentProject.getSettings());
-
-                    List<FileEditor> value = mMainViewModel.getFiles()
-                            .getValue();
-                    if (value != null) {
-                        List<File> toClose = value.stream()
-                                .map(FileEditor::getFile)
-                                .filter(file -> openedFiles.stream()
-                                        .noneMatch(editor -> file.equals(editor.getFile())))
-                                .collect(Collectors.toList());
-                        toClose.forEach(FileEditorManagerImpl.getInstance()::closeFile);
-                    }
-                    mMainViewModel.setFiles(openedFiles);
                 }
             } else {
                 if (mMainViewModel.getBottomSheetState()
@@ -122,4 +88,41 @@ public class IndexServiceConnection implements ServiceConnection {
             }
         }
     }
+
+//    public static List<FileEditor> getOpenedFiles(ProjectSettings settings) {
+//        String openedFilesString = settings.getString(ProjectSettings.SAVED_EDITOR_FILES, null);
+//        if (openedFilesString != null) {
+//            try {
+//                Type type = new TypeToken<List<FileEditorSavedState>>() {
+//                }.getType();
+//                List<FileEditorSavedState> savedStates =
+//                        new Gson().fromJson(openedFilesString, type);
+//                return savedStates.stream()
+//                        .filter(it -> it.getFile()
+//                                .exists())
+//                        .map(FileEditorManagerImpl.getInstance()::openFile)
+//                        .collect(Collectors.toList());
+//            } catch (Throwable e) {
+//                // ignored, users may have edited the file manually and is corrupt
+//                // just return an empty editor list
+//            }
+//        }
+//        return new ArrayList<>();
+//    }
+//
+//    public static void restoreFileEditors(Project currentProject, MainViewModel viewModel) {
+//        List<FileEditor> openedFiles = getOpenedFiles(currentProject.getSettings());
+//
+//        List<FileEditor> value = viewModel.getFiles()
+//                .getValue();
+//        if (value != null) {
+//            List<File> toClose = value.stream()
+//                    .map(FileEditor::getFile)
+//                    .filter(file -> openedFiles.stream()
+//                            .noneMatch(editor -> file.equals(editor.getFile())))
+//                    .collect(Collectors.toList());
+//            toClose.forEach(FileEditorManagerImpl.getInstance()::closeFile);
+//        }
+//        viewModel.setFiles(openedFiles);
+//    }
 }
